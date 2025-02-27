@@ -1,6 +1,7 @@
 #include <string>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 #include <cctype>
 #include <sstream>
@@ -25,6 +26,15 @@ class EOFException : public std::exception {
 public:
     const char* what() const noexcept override {
         return "ERROR (no more input) : END-OF-FILE encountered";
+    }
+};
+
+class RuntimeException : public std::exception {
+    string message;
+public:
+    RuntimeException(string s) : message(std::move(s)) { };
+    const char* what() const noexcept override {
+        return message.c_str();
     }
 };
 
@@ -210,8 +220,10 @@ private:
             case TokenType::QUOTE:
                 current++;
                 if (current >= tokens.size())
-                    throw runtime_error("ERROR (unexpected token) : missing expression after ' at line " +
-                        to_string(token.line) + " column " + to_string(token.column));
+                    throw RuntimeException(
+                            "ERROR (unexpected token) : missing expression after ' at line " +
+                            to_string(token.line) + " column " + to_string(token.column)
+                            );
                 return make_shared<QuoteNode>(parseExpression());
             case TokenType::INT:
             case TokenType::FLOAT:
@@ -222,8 +234,10 @@ private:
                 current++;
                 return make_shared<AtomNode>(token.type, token.value);
             default:
-                throw runtime_error("ERROR (unexpected token) : atom expected at line " +
-                    to_string(token.line) + " column " + to_string(token.column));
+                throw RuntimeException(
+                        "ERROR (unexpected token) : atom expected at line " +
+                        to_string(token.line) + " column " + to_string(token.column)
+                        );
         }
     }
 
@@ -267,8 +281,10 @@ private:
 
             // Ensure closing parenthesis
             if (current >= tokens.size() || tokens[current].type != TokenType::RIGHT_PAREN) {
-                throw runtime_error("ERROR (unexpected token) : ')' expected at line "
-                    + to_string(tokens[current].line) + " column " + to_string(tokens[current].column));
+                throw RuntimeException(
+                        "ERROR (unexpected token) : ')' expected at line " +
+                        to_string(tokens[current].line) + " column " + to_string(tokens[current].column)
+                        );
             }
             current++; // skip ')'
 
@@ -380,11 +396,9 @@ private:
                 }
             } else {
                 if (peek() == '\n')
-                    throw runtime_error(
+                    throw RuntimeException(
                             "ERROR (no closing quote) : END-OF-LINE encountered at Line " +
-                            to_string(start.line) +
-                            " Column " +
-                            to_string(start.column)
+                            to_string(start.line) + " Column " + to_string(start.column)
                     );
                 value += advance();
             }
@@ -635,8 +649,8 @@ int main() {
 
                 buffer.clear();
 
-            } catch (const runtime_error& e) {
-                cout << e.what();
+            } catch (const RuntimeException& e) {
+                cout << endl << "> " << e.what() << endl ;
                 buffer.clear();
             }
         }
