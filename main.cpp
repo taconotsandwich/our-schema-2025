@@ -7,6 +7,8 @@
 #include <iomanip>
 #include <iostream>
 #include <exception>
+#include <unordered_map>
+#include <unordered_set>
 
 using namespace std;
 
@@ -43,7 +45,7 @@ struct Token {
             : type(t), value(std::move(v)), line(l), column(c) {}
 };
 
-// Debugger class to print items at runtime since rider's debugger is fucked up
+// Debugger class to print items at runtime since clion's debugger is fucked up
 class Debugger {
 public:
     static void printTokenType(TokenType type) {
@@ -102,6 +104,7 @@ public:
 class AtomNode final : public Node {
     TokenType type;
     string value;
+
 public:
     AtomNode(const TokenType t, string v) : type(t), value(std::move(v)) {}
 
@@ -134,13 +137,14 @@ public:
     }
 };
 
+// DotNode class to represent the dot nodes in the AST
 class DotNode final : public Node {
-    shared_ptr<Node> left;
-    shared_ptr<Node> right;
-public:
-    DotNode(shared_ptr<Node> l, shared_ptr<Node> r)
-        : left(std::move(l)), right(std::move(r)) {}
+    shared_ptr<Node> left, right;
 
+public:
+    DotNode(shared_ptr<Node> l, shared_ptr<Node> r) : left(std::move(l)), right(std::move(r)) {}
+
+    // Returns the string representation of the dot node
     string toString(int indent = 0) const override {
         string leftStr = left->toString(indent + 2);
         string rightStr = right->toString(indent + 2);
@@ -161,8 +165,10 @@ public:
     }
 };
 
+// QuoteNode class to represent the quote nodes in the AST
 class QuoteNode final : public Node {
     shared_ptr<Node> expression;
+
 public:
     QuoteNode(shared_ptr<Node> expr) : expression(std::move(expr)) {}
 
@@ -175,6 +181,7 @@ public:
     }
 };
 
+// Parser class to parse the tokens and build the AST
 class Parser {
     vector<Token> tokens;
     size_t current = 0;
@@ -188,12 +195,13 @@ public:
         return parseExpression();
     }
 
-    // returns true if current token index is less than total number of tokens
+    // Returns true if current token index is less than total number of tokens
     bool hasMore() const {
         return current < tokens.size() - 1;
     }
 
 private:
+    // Parse the expression
     shared_ptr<Node> parseExpression() {
         Token& token = tokens[current];
         switch (token.type) {
@@ -202,7 +210,8 @@ private:
             case TokenType::QUOTE:
                 current++;
                 if (current >= tokens.size())
-                    throw runtime_error("ERROR (unexpected token) : missing expression after ' at line " + to_string(token.line) + " column " + to_string(token.column));
+                    throw runtime_error("ERROR (unexpected token) : missing expression after ' at line " +
+                        to_string(token.line) + " column " + to_string(token.column));
                 return make_shared<QuoteNode>(parseExpression());
             case TokenType::INT:
             case TokenType::FLOAT:
@@ -213,10 +222,15 @@ private:
                 current++;
                 return make_shared<AtomNode>(token.type, token.value);
             default:
-                throw runtime_error("ERROR (unexpected token) : atom expected at line " + to_string(token.line) + " column " + to_string(token.column));
+                throw runtime_error("ERROR (unexpected token) : atom expected at line " +
+                    to_string(token.line) + " column " + to_string(token.column));
         }
     }
 
+    // Parse the S-expression
+    // <S-exp> ::= <ATOM>
+    //    | LEFT-PAREN <S-exp> { <S-exp> } [ DOT <S-exp> ] RIGHT-PAREN
+    //    | QUOTE <S-exp>
     shared_ptr<Node> parseSExpression() {
         current++; // skip '('
 
@@ -237,11 +251,11 @@ private:
         }
 
         // Parse remaining expressions until DOT or RIGHT_PAREN
-        vector<shared_ptr<Node>> restExprs;
+        vector<shared_ptr<Node>> restExpressions;
         while (current < tokens.size() &&
                tokens[current].type != TokenType::RIGHT_PAREN &&
                tokens[current].type != TokenType::DOT) {
-            restExprs.push_back(parseExpression());
+            restExpressions.push_back(parseExpression());
         }
 
         // Check if we have a dotted pair
@@ -254,20 +268,20 @@ private:
             // Ensure closing parenthesis
             if (current >= tokens.size() || tokens[current].type != TokenType::RIGHT_PAREN) {
                 throw runtime_error("ERROR (unexpected token) : ')' expected at line "
-                                    + to_string(tokens[current].line) + " column "
-                                    + to_string(tokens[current].column));
+                    + to_string(tokens[current].line) + " column " + to_string(tokens[current].column));
             }
             current++; // skip ')'
 
             // Build the result - first build the left side chain
             shared_ptr<Node> result = rightExpr;
-            for (int i = restExprs.size() - 1; i >= 0; i--) {
-                result = make_shared<DotNode>(restExprs[i], result);
+            for (int i = restExpressions.size() - 1; i >= 0; i--) {
+                result = make_shared<DotNode>(restExpressions[i], result);
             }
             // Then add the first expression at the beginning
             return make_shared<DotNode>(firstExpr, result);
         }
-            // It's a proper list (not a dotted pair)
+
+        // It's a proper list (not a dotted pair)
         else {
             if (current >= tokens.size() || tokens[current].type != TokenType::RIGHT_PAREN) {
                 throw runtime_error("ERROR (unexpected token) : ')' expected at line "
@@ -278,29 +292,29 @@ private:
 
             // Build a proper list - all nodes linked with the last pointing to nil
             shared_ptr<Node> result = make_shared<AtomNode>(TokenType::NIL, "nil");
-            for (int i = restExprs.size() - 1; i >= 0; i--) {
-                result = make_shared<DotNode>(restExprs[i], result);
+            for (int i = restExpressions.size() - 1; i >= 0; i--) {
+                result = make_shared<DotNode>(restExpressions[i], result);
             }
+
             // Add the first expression
             return make_shared<DotNode>(firstExpr, result);
         }
     }
 };
 
+// Scanner class to scan the input and return the tokens
 class Scanner {
     string input;
-    size_t current = 0;
-    size_t line = 1;
-    size_t column = 1;
+    size_t current = 0, line = 1, column = 1;
     struct Position {
-        size_t line;
-        size_t column;
+        size_t line, column;
         Position(size_t l, size_t c) : line(l), column(c) {}
     };
 
 public:
     Scanner(string input) : input(std::move(input)) {}
 
+    // Scan the input and return the tokens
     vector<Token> scanTokens() {
         vector<Token> tokens;
         while (!isAtEnd()) {
@@ -336,6 +350,7 @@ public:
     }
 
 private:
+    // Scan the string token
     Token scanString(const Position& start) {
         string value;
         value += '"';
@@ -384,6 +399,7 @@ private:
         return Token(TokenType::STRING, value, start.line, start.column);
     }
 
+    // Scan the token
     Token scanToken(char first, const Position& start) {
         string value(1, first);
         while (!isAtEnd() && isSymbolChar(peek()))
@@ -395,12 +411,14 @@ private:
             return scanSymbol(value, start);
     }
 
+    // Scan the number token
     Token scanNumber(const string& value, const Position& start) {
         bool isFloat = value.find('.') != string::npos;
         return isFloat ? Token(TokenType::FLOAT, value, start.line, start.column)
                        : Token(TokenType::INT, value, start.line, start.column);
     }
 
+    // Scan the symbol token
     Token scanSymbol(const string& value, const Position& start) {
         if (value == "nil")
             return Token(TokenType::NIL, "nil", start.line, start.column);
@@ -409,6 +427,7 @@ private:
         return Token(TokenType::SYMBOL, value, start.line, start.column);
     }
 
+    // Check if the given string is a number
     static bool isNumber(const string& value) {
         bool hasDigit = false;
         bool hasDot = false;
@@ -435,10 +454,12 @@ private:
         return hasDigit;
     }
 
+    // Check if the given character is a symbol character
     static bool isSymbolChar(char c) {
-        return isalpha(c) || isdigit(c) || string("!?-+*/><=_~#@$%.").find(c) != string::npos;
+        return isalpha(c) || isdigit(c) || string("!?-+*/><=_~#@$%.^&").find(c) != string::npos;
     }
 
+    // Skip the whitespace characters
     void skipWhitespace() {
         while (!isAtEnd()) {
             char c = peek();
@@ -455,6 +476,7 @@ private:
         }
     }
 
+    // Advance the current position and return the character
     char advance() {
         if (isAtEnd())
             return '\0';
@@ -462,15 +484,18 @@ private:
         return input[current++];
     }
 
+    // Return the current character without advancing the position
     char peek() const {
         return isAtEnd() ? '\0' : input[current];
     }
 
+    // Check if the current position is at the end
     bool isAtEnd() const {
         return current >= input.length();
     }
 };
 
+// Printer class to print the AST nodes
 class Printer {
 public:
     static string print(const shared_ptr<Node>& node) {
