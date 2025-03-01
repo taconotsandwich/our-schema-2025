@@ -318,7 +318,7 @@ private:
     }
 };
 
-// Scanner class to scan the input and return the tokens
+// Scanner class to scan the input and return the tokens, REWRITE!!!!!!
 class Scanner {
     string input;
     size_t current = 0, line = 1, column = 1;
@@ -330,6 +330,7 @@ class Scanner {
 public:
     Scanner(string input) : input(std::move(input)) {}
 
+    // Rewrite!!!!!!!!
     // Scan the input and return the tokens
     vector<Token> scanTokens() {
         vector<Token> tokens;
@@ -442,7 +443,7 @@ private:
     }
 
     // Check if the given string is a number
-    static bool isNumber(const string& value) {
+    bool isNumber(const string& value) {
         bool hasDigit = false;
         bool hasDot = false;
         size_t start = 0;
@@ -457,8 +458,11 @@ private:
             if (isdigit(c)) {
                 hasDigit = true;
             } else if (c == '.') {
-                if (hasDot) {
-                    return false;
+                if (hasDot || i == value.length() - 1) {
+                    throw RuntimeException(
+                            "ERROR (unexpected token) : atom expected at line " +
+                            to_string(line) + " column " + to_string(column)
+                    );
                 }
                 hasDot = true;
             } else {
@@ -599,7 +603,7 @@ int main() {
                 if (cin.peek() == EOF) {
                     // Should not be empty, unless the last line is not a complete expression
                     if (!buffer.empty()) {
-                        Scanner sc(buffer);
+                        Scanner sc(buffer);// should be static!!!!!
                         auto tokens = sc.scanTokens();
                     }
 
