@@ -229,14 +229,21 @@ private:
             case TokenType::FLOAT:
             case TokenType::STRING:
             case TokenType::SYMBOL:
+                if (token.value == ".")
+                    throw RuntimeException(
+                            "ERROR (unexpected token) : atom or '(' expected when token at line " +
+                            to_string(token.line) + " column " + to_string(token.column) +
+                            " is >>" + token.value + "<<"
+                    );
             case TokenType::NIL:
             case TokenType::T:
                 current++;
                 return make_shared<AtomNode>(token.type, token.value);
             default:
                 throw RuntimeException(
-                        "ERROR (unexpected token) : atom expected at line " +
-                        to_string(token.line) + " column " + to_string(token.column)
+                        "ERROR (unexpected token) : atom or '(' expected when token at line " +
+                        to_string(token.line) + " column " + to_string(token.column) +
+                        " is >>" + token.value + "<<"
                         );
         }
     }
@@ -279,6 +286,14 @@ private:
             // Parse the expression after the dot
             auto rightExpr = parseExpression();
 
+            // Ensure dotted pair item
+            if (!rightExpr) {
+                throw RuntimeException(
+                        "ERROR (unexpected token) : atom or '(' expected at line " +
+                        to_string(tokens[current].line) + " column " + to_string(tokens[current].column)
+                );
+            }
+
             // Ensure closing parenthesis
             if (current >= tokens.size() || tokens[current].type != TokenType::RIGHT_PAREN) {
                 throw RuntimeException(
@@ -318,19 +333,13 @@ private:
     }
 };
 
-// Scanner class to scan the input and return the tokens, REWRITE!!!!!!
+// Scanner class to scan the input and return the tokens
 class Scanner {
-    string input;
-    size_t current = 0, line = 1, column = 1;
-    struct Position {
-        size_t line, column;
-        Position(size_t l, size_t c) : line(l), column(c) {}
-    };
-
 public:
-    Scanner(string input) : input(std::move(input)) {}
+    static int line, column;
 
-    // Rewrite!!!!!!!!
+    explicit Scanner(string input) : input(std::move(input)) {}
+
     // Scan the input and return the tokens
     vector<Token> scanTokens() {
         vector<Token> tokens;
@@ -367,6 +376,13 @@ public:
     }
 
 private:
+    string input;
+    size_t current = 0;
+    struct Position {
+        int line, column;
+        Position(int l, int c) : line(l), column(c) {}
+    };
+
     // Scan the string token
     Token scanString(const Position& start) {
         string value;
@@ -435,11 +451,17 @@ private:
 
     // Scan the symbol token
     Token scanSymbol(const string& value, const Position& start) {
-        if (value == "nil")
+        if (value == "nil" || value == "#f")
             return Token(TokenType::NIL, "nil", start.line, start.column);
-        if (value == "#t")
+
+        else if (value == "t" || value == "#t")
             return Token(TokenType::T, "#t", start.line, start.column);
-        return Token(TokenType::SYMBOL, value, start.line, start.column);
+
+        else if (value == ".")
+            return Token(TokenType::DOT, ".", start.line, start.column);
+
+        else
+            return Token(TokenType::SYMBOL, value, start.line, start.column);
     }
 
     // Check if the given string is a number
@@ -458,16 +480,11 @@ private:
             if (isdigit(c)) {
                 hasDigit = true;
             } else if (c == '.') {
-                if (hasDot || i == value.length() - 1) {
-                    throw RuntimeException(
-                            "ERROR (unexpected token) : atom expected at line " +
-                            to_string(line) + " column " + to_string(column)
-                    );
-                }
+                if (hasDot)
+                    return false;
                 hasDot = true;
-            } else {
+            } else
                 return false;
-            }
         }
         return hasDigit;
     }
@@ -483,7 +500,6 @@ private:
             char c = peek();
             if (isspace(c)) {
                 if (c == '\n') {
-                    line++;
                     column = 1;
                 } else {
                     column++;
@@ -561,7 +577,9 @@ private:
                     if (atom->getValue() == "nil")
                         break;
                     else {
-                        result += " " + string(M, ' ') + ".\n" + string(M, ' ') + print(current);
+                        result +=
+                                " " + string(M, ' ') +
+                                ".\n" + string(M, ' ') + print(current);
                         break;
                     }
                 } else {
@@ -588,6 +606,9 @@ bool isExitExpression(const shared_ptr<Node>& node) {
     return (atomLeft->getValue() == "exit" && atomRight->getValue() == "nil");
 }
 
+int Scanner::line = 1;
+int Scanner::column = 1;
+
 int main() {
     try {
         cout << "Welcome to OurScheme!" << endl;
@@ -603,7 +624,7 @@ int main() {
                 if (cin.peek() == EOF) {
                     // Should not be empty, unless the last line is not a complete expression
                     if (!buffer.empty()) {
-                        Scanner sc(buffer);// should be static!!!!!
+                        Scanner sc(buffer);
                         auto tokens = sc.scanTokens();
                     }
 
@@ -654,6 +675,8 @@ int main() {
                 buffer.clear();
 
             } catch (const RuntimeException& e) {
+                Scanner::line = 1;
+                Scanner::column = 1;
                 cout << endl << "> " << e.what() << endl ;
                 buffer.clear();
             }
