@@ -157,11 +157,15 @@ public:
     [[nodiscard]] string toString(int indent = 0) const override {
         string leftStr = left->toString(indent + 2);
         string rightStr = right->toString(indent + 2);
-        if (dynamic_pointer_cast<AtomNode>(right) && dynamic_pointer_cast<AtomNode>(right)->getValue() != "nil")
+
+        if (dynamic_pointer_cast<AtomNode>(right) &&
+                dynamic_pointer_cast<AtomNode>(right)->getValue() != "nil")
             return "( " + leftStr + " . " + rightStr + " )";
+
         string result = "( " + leftStr + "\n";
         result += string(indent + 2, ' ') + ". " + right->toString(indent + 2) + "\n";
         result += string(indent, ' ') + ")";
+
         return result;
     }
 
@@ -653,9 +657,8 @@ int main() {
                 }
 
                 // Expression not complete, keep reading input
-                if (balance > 0) {
+                if (balance > 0)
                     continue;
-                }
 
                 // Parse the tokens if the expression is complete
                 Parser parser(tokens);
@@ -680,7 +683,6 @@ int main() {
                 Scanner::column = 1;
                 cout << endl << "> " << e.what() << endl;
                 buffer.clear();
-                cin >> ws;
             }
         }
 
