@@ -224,8 +224,8 @@ private:
                 current++;
                 if (current >= tokens.size())
                     throw RuntimeException(
-                            "ERROR (unexpected token) : missing expression after ' at line " +
-                            to_string(token.line) + " column " + to_string(token.column)
+                            "ERROR (unexpected token) : missing expression after ' at Line " +
+                            to_string(token.line) + " Column " + to_string(token.column)
                             );
                 return make_shared<QuoteNode>(parseExpression());
             case TokenType::INT:
@@ -238,8 +238,8 @@ private:
                 return make_shared<AtomNode>(token.type, token.value);
             default:
                 throw RuntimeException(
-                        "ERROR (unexpected token) : atom or '(' expected when token at line " +
-                        to_string(token.line) + " column " + to_string(token.column) +
+                        "ERROR (unexpected token) : atom or '(' expected when token at Line " +
+                        to_string(token.line) + " Column " + to_string(token.column) +
                         " is >>" + token.value + "<<"
                         );
         }
@@ -286,16 +286,16 @@ private:
             // Ensure dotted pair item
             if (!rightExpr) {
                 throw RuntimeException(
-                        "ERROR (unexpected token) : atom or '(' expected at line " +
-                        to_string(tokens[current].line) + " column " + to_string(tokens[current].column)
+                        "ERROR (unexpected token) : atom or '(' expected at Line " +
+                        to_string(tokens[current].line) + " Column " + to_string(tokens[current].column)
                 );
             }
 
             // Ensure closing parenthesis
             if (current >= tokens.size() || tokens[current].type != TokenType::RIGHT_PAREN) {
                 throw RuntimeException(
-                        "ERROR (unexpected token) : ')' expected at line " +
-                        to_string(tokens[current].line) + " column " + to_string(tokens[current].column)
+                        "ERROR (unexpected token) : ')' expected at Line " +
+                        to_string(tokens[current].line) + " Column " + to_string(tokens[current].column)
                         );
             }
             current++; // skip ')'
@@ -312,8 +312,8 @@ private:
         // It's a proper list (not a dotted pair)
         else {
             if (current >= tokens.size() || tokens[current].type != TokenType::RIGHT_PAREN) {
-                throw runtime_error("ERROR (unexpected token) : ')' expected at line "
-                                    + to_string(tokens[current].line) + " column "
+                throw runtime_error("ERROR (unexpected token) : ')' expected at Line "
+                                    + to_string(tokens[current].line) + " Column "
                                     + to_string(tokens[current].column));
             }
             current++; // skip ')'
@@ -333,9 +333,12 @@ private:
 // Scanner class to scan the input and return the tokens
 class Scanner {
 public:
-    static int line, column;
+    int line, column;
 
-    explicit Scanner(string input) : input(std::move(input)) {}
+    explicit Scanner(string input) : input(std::move(input)) {
+        line = 1;
+        column = 1;
+    }
 
     // Scan the input and return the tokens
     vector<Token> scanTokens() {
@@ -413,7 +416,7 @@ private:
                 if (peek() == '\n')
                     throw RuntimeException(
                             "ERROR (no closing quote) : END-OF-LINE encountered at Line " +
-                            to_string(line) + " Column " + to_string(column)
+                            to_string(line) + " Column " + to_string(column + 1)
                     );
             }
         }
@@ -441,14 +444,14 @@ private:
     }
 
     // Scan the number token
-    static Token scanNumber(const string& value) {
+    [[nodiscard]] Token scanNumber(const string& value) const {
         bool isFloat = value.find('.') != string::npos;
         return isFloat ? Token(TokenType::FLOAT, value, line, column)
                        : Token(TokenType::INT, value, line, column);
     }
 
     // Scan the symbol token
-    static Token scanSymbol(const string& value) {
+    [[nodiscard]] Token scanSymbol(const string& value) const {
         if (value == "nil" || value == "#f")
             return Token(TokenType::NIL, "nil", line, column);
 
@@ -469,21 +472,25 @@ private:
         size_t start = 0;
 
         // Check for optional leading + or -
-        if (value[0] == '+' || value[0] == '-') {
+        if (value[0] == '+' || value[0] == '-')
             start = 1;
-        }
 
         for (size_t i = start; i < value.length(); ++i) {
             char c = value[i];
-            if (isdigit(c)) {
+
+            if (isdigit(c))
                 hasDigit = true;
-            } else if (c == '.') {
+
+            else if (c == '.') {
                 if (hasDot)
                     return false;
                 hasDot = true;
-            } else
+            }
+
+            else
                 return false;
         }
+
         return hasDigit;
     }
 
@@ -506,9 +513,17 @@ private:
 
     // Advance the current position and return the character
     char advance() {
-        column++;
+        if (peek() == '\n') {
+            line++;
+            column = 0;
+        }
+
+        else
+            column++;
+
         if (isAtEnd())
             return '\0';
+
         return input[current++];
     }
 
@@ -585,7 +600,7 @@ private:
                 }
             }
         }
-        result += string(indent, ' ') + ")";
+        result += string(indent, ' ') + ")\n";
         return result;
     }
 };
@@ -609,9 +624,6 @@ bool isExitExpression(const shared_ptr<Node>& node) {
     return (atomLeft->getValue() == "exit" && atomRight->getValue() == "nil");
 }
 
-int Scanner::line = 0;
-int Scanner::column = 1;
-
 int main() {
     try {
         cout << "Welcome to OurScheme!" << endl;
@@ -631,14 +643,8 @@ int main() {
                 string line;
                 getline(cin, line);
 
-                if (!line.empty())
-                    Scanner::line++;
-
-                if (buffer.empty())
-                    Scanner::column = 1;
-
-                else
-                    Scanner::column = 0;
+                if (line.empty())
+                    continue;
 
                 // Append the line to the buffer
                 buffer += line + "\n";
@@ -657,7 +663,7 @@ int main() {
                 }
 
                 // Expression not complete, keep reading input
-                if (balance > 0)
+                if (balance > 0 || tokens[0].type == TokenType::EOF_TOKEN)
                     continue;
 
                 // Parse the tokens if the expression is complete
@@ -670,17 +676,12 @@ int main() {
                     if (isExitExpression(ast))
                         throw ExitException();
 
-                    Scanner::line = 0;
-                    Scanner::column = 1;
-
                     cout << Printer::print(ast);
                 }
 
                 buffer.clear();
 
             } catch (const RuntimeException& e) {
-                Scanner::line = 0;
-                Scanner::column = 1;
                 cout << endl << "> " << e.what() << endl;
                 buffer.clear();
             }
