@@ -15,14 +15,14 @@ int g_testCase = 0;
 
 class ExitException : public std::exception {
 public:
-    const char* what() const noexcept override {
+    [[nodiscard]] const char* what() const noexcept override {
         return "Exit requested";
     }
 };
 
 class EOFException : public std::exception {
 public:
-    const char* what() const noexcept override {
+    [[nodiscard]] const char* what() const noexcept override {
         return "ERROR (no more input) : END-OF-FILE encountered";
     }
 };
@@ -30,8 +30,9 @@ public:
 class RuntimeException : public std::exception {
     string message;
 public:
-    RuntimeException(string s) : message(std::move(s)) { };
-    const char* what() const noexcept override {
+    explicit RuntimeException(string s) : message(std::move(s)) { };
+
+    [[nodiscard]] const char* what() const noexcept override {
         return message.c_str();
     }
 };
@@ -105,7 +106,7 @@ public:
 class Node {
 public:
     virtual ~Node() = default;
-    virtual string toString(int indent = 0) const = 0;
+    [[nodiscard]] virtual string toString(int indent = 0) const = 0;
 };
 
 // AtomNode class to represent the atomic nodes in the AST
@@ -116,7 +117,7 @@ class AtomNode final : public Node {
 public:
     AtomNode(const TokenType t, string v) : type(t), value(std::move(v)) {}
 
-    string toString(int indent = 0) const override {
+    [[nodiscard]] string toString(int indent = 0) const override {
         if (Debugger::isDebugging)
             Debugger::printTokenType(type);
 
@@ -136,11 +137,11 @@ public:
         return value;
     }
 
-    TokenType getType() const {
+    [[nodiscard]] TokenType getType() const {
         return type;
     }
 
-    string getValue() const {
+    [[nodiscard]] string getValue() const {
         return value;
     }
 };
@@ -153,7 +154,7 @@ public:
     DotNode(shared_ptr<Node> l, shared_ptr<Node> r) : left(std::move(l)), right(std::move(r)) {}
 
     // Returns the string representation of the dot node
-    string toString(int indent = 0) const override {
+    [[nodiscard]] string toString(int indent = 0) const override {
         string leftStr = left->toString(indent + 2);
         string rightStr = right->toString(indent + 2);
         if (dynamic_pointer_cast<AtomNode>(right) && dynamic_pointer_cast<AtomNode>(right)->getValue() != "nil")
@@ -164,11 +165,11 @@ public:
         return result;
     }
 
-    const shared_ptr<Node>& getLeft() const {
+    [[nodiscard]] const shared_ptr<Node>& getLeft() const {
         return left;
     }
 
-    const shared_ptr<Node>& getRight() const {
+    [[nodiscard]] const shared_ptr<Node>& getRight() const {
         return right;
     }
 };
@@ -178,13 +179,13 @@ class QuoteNode final : public Node {
     shared_ptr<Node> expression;
 
 public:
-    QuoteNode(shared_ptr<Node> expr) : expression(std::move(expr)) {}
+    explicit QuoteNode(shared_ptr<Node> expr) : expression(std::move(expr)) {}
 
-    string toString(int indent = 0) const override {
+    [[nodiscard]] string toString(int indent = 0) const override {
         return "'" + expression->toString();
     }
 
-    shared_ptr<Node> getExpression() const {
+    [[nodiscard]] shared_ptr<Node> getExpression() const {
         return expression;
     }
 };
@@ -195,7 +196,7 @@ class Parser {
     size_t current = 0;
 
 public:
-    Parser(vector<Token> t) : tokens(std::move(t)) {}
+    explicit Parser(vector<Token> t) : tokens(std::move(t)) {}
 
     shared_ptr<Node> parse() {
         if (current >= tokens.size())
@@ -204,7 +205,7 @@ public:
     }
 
     // Returns true if current token index is less than total number of tokens
-    bool hasMore() const {
+    [[nodiscard]] bool hasMore() const {
         return current < tokens.size() - 1;
     }
 
@@ -436,14 +437,14 @@ private:
     }
 
     // Scan the number token
-    Token scanNumber(const string& value) {
+    static Token scanNumber(const string& value) {
         bool isFloat = value.find('.') != string::npos;
         return isFloat ? Token(TokenType::FLOAT, value, line, column)
                        : Token(TokenType::INT, value, line, column);
     }
 
     // Scan the symbol token
-    Token scanSymbol(const string& value) {
+    static Token scanSymbol(const string& value) {
         if (value == "nil" || value == "#f")
             return Token(TokenType::NIL, "nil", line, column);
 
@@ -458,7 +459,7 @@ private:
     }
 
     // Check if the given string is a number
-    bool isNumber(const string& value) {
+    static bool isNumber(const string& value) {
         bool hasDigit = false;
         bool hasDot = false;
         size_t start = 0;
@@ -508,12 +509,12 @@ private:
     }
 
     // Return the current character without advancing the position
-    char peek() const {
+    [[nodiscard]] char peek() const {
         return isAtEnd() ? '\0' : input[current];
     }
 
     // Check if the current position is at the end
-    bool isAtEnd() const {
+    [[nodiscard]] bool isAtEnd() const {
         return current >= input.length();
     }
 };
