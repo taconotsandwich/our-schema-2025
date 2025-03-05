@@ -1,15 +1,13 @@
-#include <string>
-#include <memory>
-#include <stdexcept>
-#include <utility>
-#include <vector>
 #include <cctype>
-#include <sstream>
+#include <exception>
 #include <iomanip>
 #include <iostream>
-#include <exception>
-#include <unordered_map>
-#include <unordered_set>
+#include <memory>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace std;
 
@@ -55,7 +53,7 @@ struct Token {
             : type(t), value(std::move(v)), line(l), column(c) {}
 };
 
-// Debugger class to print items at runtime since clion's debugger is fucked up
+// Debugger class to print items at runtime since CLion's debugger is fucked up
 class Debugger {
 public:
     static void printTokenType(TokenType type) {
@@ -229,12 +227,6 @@ private:
             case TokenType::FLOAT:
             case TokenType::STRING:
             case TokenType::SYMBOL:
-                if (token.value == ".")
-                    throw RuntimeException(
-                            "ERROR (unexpected token) : atom or '(' expected when token at line " +
-                            to_string(token.line) + " column " + to_string(token.column) +
-                            " is >>" + token.value + "<<"
-                    );
             case TokenType::NIL:
             case TokenType::T:
                 current++;
@@ -347,27 +339,31 @@ public:
             skipWhitespace();
             if (isAtEnd())
                 break;
-            Position start{line, column};
             char c = advance();
             switch (c) {
                 case '(':
-                    tokens.emplace_back(TokenType::LEFT_PAREN, "(", start.line, start.column);
+                    tokens.emplace_back(TokenType::LEFT_PAREN, "(", line, column);
+                    column = 0;
                     break;
                 case ')':
-                    tokens.emplace_back(TokenType::RIGHT_PAREN, ")", start.line, start.column);
+                    tokens.emplace_back(TokenType::RIGHT_PAREN, ")", line, column);
+                    column = 0;
                     break;
                 case '"':
-                    tokens.push_back(scanString(start));
+                    tokens.push_back(scanString());
+                    column = 0;
                     break;
                 case '\'':
-                    tokens.emplace_back(TokenType::QUOTE, "'", start.line, start.column);
+                    tokens.emplace_back(TokenType::QUOTE, "'", line, column);
+                    column = 0;
                     break;
                 case ';':
                     while (!isAtEnd() && peek() != '\n')
                         advance();
                     break;
                 default:
-                    tokens.push_back(scanToken(c, start));
+                    tokens.push_back(scanToken(c));
+                    column = 0;
                     break;
             }
         }
@@ -378,13 +374,9 @@ public:
 private:
     string input;
     size_t current = 0;
-    struct Position {
-        int line, column;
-        Position(int l, int c) : line(l), column(c) {}
-    };
 
     // Scan the string token
-    Token scanString(const Position& start) {
+    Token scanString() {
         string value;
         value += '"';
         while (!isAtEnd() && peek() != '"') {
@@ -412,12 +404,12 @@ private:
                         break;
                 }
             } else {
+                value += advance();
                 if (peek() == '\n')
                     throw RuntimeException(
                             "ERROR (no closing quote) : END-OF-LINE encountered at Line " +
-                            to_string(start.line) + " Column " + to_string(start.column)
+                            to_string(line) + " Column " + to_string(column)
                     );
-                value += advance();
             }
         }
 
@@ -427,41 +419,42 @@ private:
         value += '"';
 
         advance();
-        return Token(TokenType::STRING, value, start.line, start.column);
+        return Token(TokenType::STRING, value, line, column);
     }
 
     // Scan the token
-    Token scanToken(char first, const Position& start) {
+    Token scanToken(char first) {
         string value(1, first);
         while (!isAtEnd() && isSymbolChar(peek()))
             value += advance();
 
         if (isNumber(value))
-            return scanNumber(value, start);
+            return scanNumber(value);
+
         else
-            return scanSymbol(value, start);
+            return scanSymbol(value);
     }
 
     // Scan the number token
-    Token scanNumber(const string& value, const Position& start) {
+    Token scanNumber(const string& value) {
         bool isFloat = value.find('.') != string::npos;
-        return isFloat ? Token(TokenType::FLOAT, value, start.line, start.column)
-                       : Token(TokenType::INT, value, start.line, start.column);
+        return isFloat ? Token(TokenType::FLOAT, value, line, column)
+                       : Token(TokenType::INT, value, line, column);
     }
 
     // Scan the symbol token
-    Token scanSymbol(const string& value, const Position& start) {
+    Token scanSymbol(const string& value) {
         if (value == "nil" || value == "#f")
-            return Token(TokenType::NIL, "nil", start.line, start.column);
+            return Token(TokenType::NIL, "nil", line, column);
 
         else if (value == "t" || value == "#t")
-            return Token(TokenType::T, "#t", start.line, start.column);
+            return Token(TokenType::T, "#t", line, column);
 
         else if (value == ".")
-            return Token(TokenType::DOT, ".", start.line, start.column);
+            return Token(TokenType::DOT, ".", line, column);
 
         else
-            return Token(TokenType::SYMBOL, value, start.line, start.column);
+            return Token(TokenType::SYMBOL, value, line, column);
     }
 
     // Check if the given string is a number
@@ -498,23 +491,19 @@ private:
     void skipWhitespace() {
         while (!isAtEnd()) {
             char c = peek();
-            if (isspace(c)) {
-                if (c == '\n') {
-                    column = 1;
-                } else {
-                    column++;
-                }
+            if (isspace(c))
                 advance();
-            } else
+
+            else
                 break;
         }
     }
 
     // Advance the current position and return the character
     char advance() {
+        column++;
         if (isAtEnd())
             return '\0';
-        column++;
         return input[current++];
     }
 
@@ -536,16 +525,17 @@ public:
         if (!node)
             return "";
 
-        if (auto atom = dynamic_pointer_cast<AtomNode>(node))
+        else if (auto atom = dynamic_pointer_cast<AtomNode>(node))
             return printAtom(atom);
 
-        if (auto quote = dynamic_pointer_cast<QuoteNode>(node))
+        else if (auto quote = dynamic_pointer_cast<QuoteNode>(node))
             return "'" + print(quote->getExpression());
 
-        if (auto dot = dynamic_pointer_cast<DotNode>(node))
+        else if (auto dot = dynamic_pointer_cast<DotNode>(node))
             return printList(dot, 0);
 
-        return "";
+        else
+            return "";
     }
 
 private:
@@ -553,8 +543,10 @@ private:
         string value = atom->toString();
         if (value == "nil" || value == "()" || value == "#f")
             return "nil\n";
-        if (value == "t" || value == "#t")
+
+        else if (value == "t" || value == "#t")
             return "#t\n";
+
         return value + "\n";
     }
 
@@ -597,16 +589,22 @@ private:
 bool isExitExpression(const shared_ptr<Node>& node) {
     // We assume (exit) is represented as a proper list with one element "exit"
     auto dot = dynamic_pointer_cast<DotNode>(node);
-    if (!dot) return false;
+
+    if (!dot)
+        return false;
+
     auto left = dot->getLeft();
     auto right = dot->getRight();
     auto atomLeft = dynamic_pointer_cast<AtomNode>(left);
     auto atomRight = dynamic_pointer_cast<AtomNode>(right);
-    if (!atomLeft || !atomRight) return false;
+
+    if (!atomLeft || !atomRight)
+        return false;
+
     return (atomLeft->getValue() == "exit" && atomRight->getValue() == "nil");
 }
 
-int Scanner::line = 1;
+int Scanner::line = 0;
 int Scanner::column = 1;
 
 int main() {
@@ -620,24 +618,22 @@ int main() {
         string buffer;
         while (true) {
             try {
-                // Check for EOF
-                if (cin.peek() == EOF) {
-                    // Should not be empty, unless the last line is not a complete expression
-                    if (!buffer.empty()) {
-                        Scanner sc(buffer);
-                        auto tokens = sc.scanTokens();
-                    }
-
-                    // Is EOF, print error message and exit the program
-                    else
-                        throw EOFException();
-
-                    break;
-                }
+                // Is EOF, print error message and exit the program
+                if (cin.peek() == EOF)
+                    throw EOFException();
 
                 // Read input line by line
                 string line;
                 getline(cin, line);
+
+                if (!line.empty())
+                    Scanner::line++;
+
+                if (buffer.empty())
+                    Scanner::column = 1;
+
+                else
+                    Scanner::column = 0;
 
                 // Append the line to the buffer
                 buffer += line + "\n";
@@ -656,8 +652,9 @@ int main() {
                 }
 
                 // Expression not complete, keep reading input
-                if (balance > 0)
+                if (balance > 0) {
                     continue;
+                }
 
                 // Parse the tokens if the expression is complete
                 Parser parser(tokens);
@@ -669,16 +666,20 @@ int main() {
                     if (isExitExpression(ast))
                         throw ExitException();
 
+                    Scanner::line = 0;
+                    Scanner::column = 1;
+
                     cout << Printer::print(ast);
                 }
 
                 buffer.clear();
 
             } catch (const RuntimeException& e) {
-                Scanner::line = 1;
+                Scanner::line = 0;
                 Scanner::column = 1;
-                cout << endl << "> " << e.what() << endl ;
+                cout << endl << "> " << e.what() << endl;
                 buffer.clear();
+                cin >> ws;
             }
         }
 
