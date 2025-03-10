@@ -196,15 +196,15 @@ public:
 
 // Parser class to parse the tokens and build the AST
 class Parser {
-    vector<Token> tokens;
-    size_t current = 0;
-
 public:
     explicit Parser(vector<Token> t) : tokens(std::move(t)) {}
+
+    size_t current = 0;
 
     shared_ptr<Node> parse() {
         if (current >= tokens.size())
             throw EOFException();
+
         return parseExpression();
     }
 
@@ -214,6 +214,8 @@ public:
     }
 
 private:
+    vector<Token> tokens;
+
     // Parse the expression
     shared_ptr<Node> parseExpression() {
         Token& token = tokens[current];
@@ -636,7 +638,7 @@ int main() {
         while (true) {
             try {
                 // Is EOF, print error message and exit the program
-                if (cin.peek() == EOF)
+                if (cin.peek() == EOF && buffer.empty())
                     throw EOFException();
 
                 // Read input line by line
@@ -663,7 +665,9 @@ int main() {
                 }
 
                 // Expression not complete, keep reading input
-                if (balance > 0 || tokens[0].type == TokenType::EOF_TOKEN)
+                if (balance > 0 ||
+                    tokens[0].type == TokenType::EOF_TOKEN ||
+                    (tokens[0].type == TokenType::QUOTE && tokens[1].type == TokenType::EOF_TOKEN))
                     continue;
 
                 // Parse the tokens if the expression is complete
