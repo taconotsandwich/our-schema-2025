@@ -543,67 +543,78 @@ private:
 // Printer class to print the AST nodes
 class Printer {
 public:
-    static string print(const shared_ptr<Node>& node) {
+    // The print function now accepts an indent level (default 0)
+    static string print(const shared_ptr<Node>& node, int indent = 0) {
         if (!node)
             return "";
-
-        else if (auto atom = dynamic_pointer_cast<AtomNode>(node))
+        if (auto atom = dynamic_pointer_cast<AtomNode>(node))
             return printAtom(atom);
-
-        else if (auto quote = dynamic_pointer_cast<QuoteNode>(node))
-            return "'" + print(quote->getExpression());
-
-        else if (auto dot = dynamic_pointer_cast<DotNode>(node))
-            return printList(dot, 0);
-
-        else
-            return "";
+        if (auto quote = dynamic_pointer_cast<QuoteNode>(node))
+            return "'" + print(quote->getExpression(), indent);
+        if (auto dot = dynamic_pointer_cast<DotNode>(node))
+            return printList(dot, indent);
+        return "";
     }
 
 private:
+    // Print an atom as a string (without extra newlines)
     static string printAtom(const shared_ptr<AtomNode>& atom) {
         string value = atom->toString();
         if (value == "nil" || value == "()" || value == "#f")
-            return "nil\n";
-
-        else if (value == "t" || value == "#t")
-            return "#t\n";
-
-        return value + "\n";
+            return "nil";
+        if (value == "t" || value == "#t")
+            return "#t";
+        return value;
     }
 
+    // Print a list (DotNode) with proper indentation.
+    // The closing ")" is printed on a new line at the same indent level as the "(".
     static string printList(const shared_ptr<DotNode>& node, int indent) {
-        string result = "( ";
-        shared_ptr<Node> current = node;
-        bool first = true;
-        int M = indent + 1;
+        // indentStr holds the indent for the current list.
+        string indentStr(indent, ' ');
+        // innerIndent is used for list elements (2 spaces more than the current list's indent).
+        string innerIndent = string(indent + 2, ' ');
+        stringstream ss;
+        ss << indentStr << "( ";
 
+        // Gather all elements of the list.
+        vector<string> elements;
+        shared_ptr<Node> current = node;
         while (true) {
             if (auto dot = dynamic_pointer_cast<DotNode>(current)) {
-                if (!first) {
-                    result += " " + string(M, ' ');
-                }
-                result += print(dot->getLeft());
-                first = false;
+                // Print left part with indent increased by 2.
+                elements.push_back(print(dot->getLeft(), indent + 2));
                 current = dot->getRight();
             } else {
+                // For a proper list, the last element should be nil.
                 if (auto atom = dynamic_pointer_cast<AtomNode>(current)) {
                     if (atom->getValue() == "nil")
                         break;
                     else {
-                        result +=
-                                " " + string(M, ' ') +
-                                ".\n" + string(M, ' ') + print(current);
+                        // Dotted pair: print a dot and then the final element.
+                        elements.emplace_back(".");
+                        elements.push_back(print(current, indent + 2));
                         break;
                     }
                 } else {
-                    result += " " + string(M, ' ') + print(current);
+                    elements.push_back(print(current, indent + 2));
                     break;
                 }
             }
         }
-        result += string(indent, ' ') + ")\n";
-        return result;
+
+        // Format the list output:
+        if (elements.size() == 1)
+            ss << elements[0] << " )";
+        else {
+            ss << elements[0];
+            for (size_t i = 1; i < elements.size(); i++)
+                ss << "\n" << innerIndent << elements[i];
+            // The closing right parenthesis is printed on its own line,
+            // aligned with the opening "(".
+            ss << "\n" << indentStr << ")";
+        }
+        return ss.str();
     }
 };
 
@@ -673,20 +684,20 @@ int main() {
                 // Parse the tokens if the expression is complete
                 Parser parser(tokens);
                 while (parser.hasMore()) {
-                    shared_ptr<Node> ast = parser.parse();
-
                     cout << endl << "> ";
+
+                    shared_ptr<Node> ast = parser.parse();
                     // If the parsed expression is "(exit)", throw exception to exit
                     if (isExitExpression(ast))
                         throw ExitException();
 
-                    cout << Printer::print(ast);
+                    cout << Printer::print(ast) << endl;
                 }
 
                 buffer.clear();
 
             } catch (const RuntimeException& e) {
-                cout << endl << "> " << e.what() << endl;
+                cout << e.what() << endl;
                 buffer.clear();
             }
         }
