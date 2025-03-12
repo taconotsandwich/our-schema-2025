@@ -202,8 +202,8 @@ public:
     size_t current = 0;
 
     shared_ptr<Node> parse() {
-        if (current >= tokens.size())
-            throw EOFException();
+//        if (current >= tokens.size())
+//            throw EOFException();
 
         return parseExpression();
     }
@@ -230,9 +230,16 @@ private:
                             to_string(token.line) + " Column " + to_string(token.column)
                             );
                 return make_shared<QuoteNode>(parseExpression());
+            case TokenType::STRING:
+                if (token.value[token.value.length()-1] != '"')
+                    throw RuntimeException(
+                            "ERROR (no closing quote) : END-OF-LINE encountered at Line " +
+                            to_string(token.line) + " Column " + to_string(token.column + 1)
+                    );
+                current++;
+                return make_shared<AtomNode>(token.type, token.value);
             case TokenType::INT:
             case TokenType::FLOAT:
-            case TokenType::STRING:
             case TokenType::SYMBOL:
             case TokenType::NIL:
             case TokenType::T:
@@ -241,7 +248,7 @@ private:
             default:
                 throw RuntimeException(
                         "ERROR (unexpected token) : atom or '(' expected when token at Line " +
-                        to_string(token.line) + " Column " + to_string(token.column) +
+                        to_string(token.line) + " Column " + to_string(token.column + 1) +
                         " is >>" + token.value + "<<"
                         );
         }
@@ -392,8 +399,6 @@ private:
         while (!isAtEnd() && peek() != '"') {
             if (peek() == '\\') {
                 advance();
-                if (isAtEnd())
-                    throw EOFException();
                 char escapedChar = advance();
                 switch (escapedChar) {
                     case 'n':
@@ -414,12 +419,11 @@ private:
                         break;
                 }
             } else {
+                if (peek() == '\n') {
+                    cin.get();
+                    return Token(TokenType::STRING, value, line, column);
+                }
                 value += advance();
-                if (peek() == '\n')
-                    throw RuntimeException(
-                            "ERROR (no closing quote) : END-OF-LINE encountered at Line " +
-                            to_string(line) + " Column " + to_string(column + 1)
-                    );
             }
         }
 
@@ -543,80 +547,61 @@ private:
 // Printer class to print the AST nodes
 class Printer {
 public:
-    // The print function now accepts an indent level (default 0)
+    // The main print function: prints an AST node using proper indentation.
     static string print(const shared_ptr<Node>& node, int indent = 0) {
-        if (!node)
-            return "";
-        if (auto atom = dynamic_pointer_cast<AtomNode>(node))
-            return printAtom(atom);
-        if (auto quote = dynamic_pointer_cast<QuoteNode>(node))
-            return "'" + print(quote->getExpression(), indent);
-        if (auto dot = dynamic_pointer_cast<DotNode>(node))
-            return printList(dot, indent);
-        return "";
+        // Handle quoted expressions: print a leading single-quote.
+        if (auto quote = dynamic_pointer_cast<QuoteNode>(node)) {
+            string result = "( quote";
+            result += "\n" + string(indent + 2, ' ') + print(quote->getExpression(), indent + 2);
+            result += "\n" + string(indent, ' ') + ")";
+            return result;
+        }
+        // If the node is a DotNode, unroll it as a list.
+        if (auto dot = dynamic_pointer_cast<DotNode>(node)) {
+            vector<shared_ptr<Node>> elems;
+            shared_ptr<Node> tail;
+            unrollList(node, elems, tail);
+            // A proper list has a tail that is the atom "nil".
+            bool proper = false;
+            if (auto atomTail = dynamic_pointer_cast<AtomNode>(tail)) {
+                if (atomTail->getValue() == "nil")
+                    proper = true;
+            }
+            string result;
+            result += "( ";
+            if (!elems.empty()) {
+                // Print the first element inline.
+                result += print(elems[0], indent + 2);
+                // Print each subsequent element on a new line indented by two spaces.
+                for (size_t i = 1; i < elems.size(); i++) {
+                    result += "\n" + string(indent + 2, ' ') + print(elems[i], indent + 2);
+                }
+            }
+            // For dotted lists, print the dot on its own line with the same indent,
+            // then print the tail on a new line with that same indent.
+            if (!proper) {
+                result += "\n" + string(indent + 2, ' ') + ".";
+                result += "\n" + string(indent + 2, ' ') + print(tail, indent + 2);
+            }
+            result += "\n" + string(indent, ' ') + ")";
+            return result;
+        }
+        // For all other nodes, use their own toString() implementation.
+        return node->toString();
     }
 
 private:
-    // Print an atom as a string (without extra newlines)
-    static string printAtom(const shared_ptr<AtomNode>& atom) {
-        string value = atom->toString();
-        if (value == "nil" || value == "()" || value == "#f")
-            return "nil";
-        if (value == "t" || value == "#t")
-            return "#t";
-        return value;
-    }
-
-    // Print a list (DotNode) with proper indentation.
-    // The closing ")" is printed on a new line at the same indent level as the "(".
-    static string printList(const shared_ptr<DotNode>& node, int indent) {
-        // indentStr holds the indent for the current list.
-        string indentStr(indent, ' ');
-        // innerIndent is used for list elements (2 spaces more than the current list's indent).
-        string innerIndent = string(indent + 2, ' ');
-        stringstream ss;
-        ss << indentStr << "( ";
-
-        // Gather all elements of the list.
-        vector<string> elements;
-        shared_ptr<Node> current = node;
-        while (true) {
-            if (auto dot = dynamic_pointer_cast<DotNode>(current)) {
-                // Print left part with indent increased by 2.
-                elements.push_back(print(dot->getLeft(), indent + 2));
-                current = dot->getRight();
-            } else {
-                // For a proper list, the last element should be nil.
-                if (auto atom = dynamic_pointer_cast<AtomNode>(current)) {
-                    if (atom->getValue() == "nil")
-                        break;
-                    else {
-                        // Dotted pair: print a dot and then the final element.
-                        elements.emplace_back(".");
-                        elements.push_back(print(current, indent + 2));
-                        break;
-                    }
-                } else {
-                    elements.push_back(print(current, indent + 2));
-                    break;
-                }
-            }
+    // Helper to unroll a DotNode chain into its elements and tail.
+    static void unrollList(const shared_ptr<Node>& node, vector<shared_ptr<Node>>& elems, shared_ptr<Node>& tail) {
+        auto current = node;
+        while (auto d = dynamic_pointer_cast<DotNode>(current)) {
+            elems.push_back(d->getLeft());
+            current = d->getRight();
         }
-
-        // Format the list output:
-        if (elements.size() == 1)
-            ss << elements[0] << " )";
-        else {
-            ss << elements[0];
-            for (size_t i = 1; i < elements.size(); i++)
-                ss << "\n" << innerIndent << elements[i];
-            // The closing right parenthesis is printed on its own line,
-            // aligned with the opening "(".
-            ss << "\n" << indentStr << ")";
-        }
-        return ss.str();
+        tail = current;
     }
 };
+
 
 // Helper function to check whether the S-expression is exactly (exit)
 bool isExitExpression(const shared_ptr<Node>& node) {
@@ -649,7 +634,7 @@ int main() {
         while (true) {
             try {
                 // Is EOF, print error message and exit the program
-                if (cin.peek() == EOF && buffer.empty())
+                if (cin.peek() == EOF)
                     throw EOFException();
 
                 // Read input line by line
@@ -684,9 +669,10 @@ int main() {
                 // Parse the tokens if the expression is complete
                 Parser parser(tokens);
                 while (parser.hasMore()) {
+                    shared_ptr<Node> ast = parser.parse();
+
                     cout << endl << "> ";
 
-                    shared_ptr<Node> ast = parser.parse();
                     // If the parsed expression is "(exit)", throw exception to exit
                     if (isExitExpression(ast))
                         throw ExitException();
@@ -697,7 +683,7 @@ int main() {
                 buffer.clear();
 
             } catch (const RuntimeException& e) {
-                cout << e.what() << endl;
+                cout << endl << "> " << e.what() << endl;
                 buffer.clear();
             }
         }

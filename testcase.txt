@@ -1,7 +1,5 @@
 1
-  (1.(2))';(1;2"3")
-    (
- nil
-       .
-    nil
-    )
+( Four score and
+    seven years ago.
+    "Our fathers brought forth,
+   on this continent, "
