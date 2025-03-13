@@ -1,10 +1,10 @@
+#include <algorithm>
 #include <cctype>
 #include <exception>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -194,209 +194,57 @@ public:
     }
 };
 
-// Parser class to parse the tokens and build the AST
-class Parser {
-public:
-    explicit Parser(vector<Token> t) : tokens(std::move(t)) {}
-
-    size_t current = 0;
-
-    shared_ptr<Node> parse() {
-//        if (current >= tokens.size())
-//            throw EOFException();
-
-        return parseExpression();
-    }
-
-    // Returns true if current token index is less than total number of tokens
-    [[nodiscard]] bool hasMore() const {
-        return current < tokens.size() - 1;
-    }
-
-private:
-    vector<Token> tokens;
-
-    // Parse the expression
-    shared_ptr<Node> parseExpression() {
-        Token& token = tokens[current];
-        switch (token.type) {
-            case TokenType::LEFT_PAREN:
-                return parseSExpression();
-            case TokenType::QUOTE:
-                current++;
-                if (current >= tokens.size())
-                    throw RuntimeException(
-                            "ERROR (unexpected token) : missing expression after ' at Line " +
-                            to_string(token.line) + " Column " + to_string(token.column)
-                            );
-                return make_shared<QuoteNode>(parseExpression());
-            case TokenType::STRING:
-                if (token.value[token.value.length()-1] != '"')
-                    throw RuntimeException(
-                            "ERROR (no closing quote) : END-OF-LINE encountered at Line " +
-                            to_string(token.line) + " Column " + to_string(token.column + 1)
-                    );
-                current++;
-                return make_shared<AtomNode>(token.type, token.value);
-            case TokenType::INT:
-            case TokenType::FLOAT:
-            case TokenType::SYMBOL:
-            case TokenType::NIL:
-            case TokenType::T:
-                current++;
-                return make_shared<AtomNode>(token.type, token.value);
-            default:
-                throw RuntimeException(
-                        "ERROR (unexpected token) : atom or '(' expected when token at Line " +
-                        to_string(token.line) + " Column " + to_string(token.column + 1) +
-                        " is >>" + token.value + "<<"
-                        );
-        }
-    }
-
-    // Parse the S-expression
-    // <S-exp> ::= <ATOM>
-    //    | LEFT-PAREN <S-exp> { <S-exp> } [ DOT <S-exp> ] RIGHT-PAREN
-    //    | QUOTE <S-exp>
-    shared_ptr<Node> parseSExpression() {
-        current++; // skip '('
-
-        // Handle empty list case: ()
-        if (current < tokens.size() && tokens[current].type == TokenType::RIGHT_PAREN) {
-            current++;
-            return make_shared<AtomNode>(TokenType::NIL, "nil");
-        }
-
-        // Parse the first expression (required)
-        auto firstExpr = parseExpression();
-
-        // If we hit the closing paren, it's a single element list
-        if (current < tokens.size() && tokens[current].type == TokenType::RIGHT_PAREN) {
-            current++; // skip ')'
-            // Create a proper list with one element
-            return make_shared<DotNode>(firstExpr, make_shared<AtomNode>(TokenType::NIL, "nil"));
-        }
-
-        // Parse remaining expressions until DOT or RIGHT_PAREN
-        vector<shared_ptr<Node>> restExpressions;
-        while (current < tokens.size() &&
-               tokens[current].type != TokenType::RIGHT_PAREN &&
-               tokens[current].type != TokenType::DOT) {
-            restExpressions.push_back(parseExpression());
-        }
-
-        // Check if we have a dotted pair
-        if (current < tokens.size() && tokens[current].type == TokenType::DOT) {
-            current++; // skip the dot
-
-            // Parse the expression after the dot
-            auto rightExpr = parseExpression();
-
-            // Ensure dotted pair item
-            if (!rightExpr) {
-                throw RuntimeException(
-                        "ERROR (unexpected token) : atom or '(' expected at Line " +
-                        to_string(tokens[current].line) + " Column " + to_string(tokens[current].column)
-                );
-            }
-
-            // Ensure closing parenthesis
-            if (current >= tokens.size() || tokens[current].type != TokenType::RIGHT_PAREN) {
-                throw RuntimeException(
-                        "ERROR (unexpected token) : ')' expected at Line " +
-                        to_string(tokens[current].line) + " Column " + to_string(tokens[current].column)
-                        );
-            }
-            current++; // skip ')'
-
-            // Build the result - first build the left side chain
-            shared_ptr<Node> result = rightExpr;
-            for (int i = restExpressions.size() - 1; i >= 0; i--) {
-                result = make_shared<DotNode>(restExpressions[i], result);
-            }
-            // Then add the first expression at the beginning
-            return make_shared<DotNode>(firstExpr, result);
-        }
-
-        // It's a proper list (not a dotted pair)
-        else {
-            if (current >= tokens.size() || tokens[current].type != TokenType::RIGHT_PAREN) {
-                throw runtime_error("ERROR (unexpected token) : ')' expected at Line "
-                                    + to_string(tokens[current].line) + " Column "
-                                    + to_string(tokens[current].column));
-            }
-            current++; // skip ')'
-
-            // Build a proper list - all nodes linked with the last pointing to nil
-            shared_ptr<Node> result = make_shared<AtomNode>(TokenType::NIL, "nil");
-            for (int i = restExpressions.size() - 1; i >= 0; i--) {
-                result = make_shared<DotNode>(restExpressions[i], result);
-            }
-
-            // Add the first expression
-            return make_shared<DotNode>(firstExpr, result);
-        }
-    }
-};
-
 // Scanner class to scan the input and return the tokens
 class Scanner {
 public:
     int line, column;
 
-    explicit Scanner(string input) : input(std::move(input)) {
+    explicit Scanner() {
         line = 1;
         column = 1;
     }
 
     // Scan the input and return the tokens
-    vector<Token> scanTokens() {
-        vector<Token> tokens;
-        while (!isAtEnd()) {
-            skipWhitespace();
-            if (isAtEnd())
-                break;
-            char c = advance();
-            switch (c) {
-                case '(':
-                    tokens.emplace_back(TokenType::LEFT_PAREN, "(", line, column);
-                    column = 0;
-                    break;
-                case ')':
-                    tokens.emplace_back(TokenType::RIGHT_PAREN, ")", line, column);
-                    column = 0;
-                    break;
-                case '"':
-                    tokens.push_back(scanString());
-                    column = 0;
-                    break;
-                case '\'':
-                    tokens.emplace_back(TokenType::QUOTE, "'", line, column);
-                    column = 0;
-                    break;
-                case ';':
-                    while (!isAtEnd() && peek() != '\n')
-                        advance();
-                    break;
-                default:
-                    tokens.push_back(scanToken(c));
-                    column = 0;
-                    break;
-            }
+    Token scanToken() {
+        skipWhitespace();
+        char c = advance();
+        switch (c) {
+            case '(':
+                return Token(TokenType::LEFT_PAREN, "(", line, column);
+            case ')':
+                return Token(TokenType::RIGHT_PAREN, ")", line, column);
+            case '"':
+                return scanString();
+            case '\'':
+                return Token(TokenType::QUOTE, "'", line, column);
+            case ';':
+                while (peek() != '\n')
+                    advance();
+                return scanToken();
+            default:
+                return scanToken(c);
         }
-        tokens.emplace_back(TokenType::EOF_TOKEN, "", line, column);
-        return tokens;
+    }
+
+    Token peekToken() {
+        buffer.clear();
+        int tLine = line, tColumn = column;
+        Token token = scanToken();
+        line = tLine, column = tColumn;
+        reverse(buffer.begin(), buffer.end());
+        for (char c : buffer)
+            putback(c);
+        return token;
     }
 
 private:
-    string input;
-    size_t current = 0;
+    string buffer;
 
     // Scan the string token
     Token scanString() {
         string value;
         value += '"';
-        while (!isAtEnd() && peek() != '"') {
+        while (peek() != '"') {
             if (peek() == '\\') {
                 advance();
                 char escapedChar = advance();
@@ -420,15 +268,15 @@ private:
                 }
             } else {
                 if (peek() == '\n') {
-                    cin.get();
-                    return Token(TokenType::STRING, value, line, column);
+                    int eLine = line, eColumn = column + 1;
+                    throw RuntimeException(
+                            "ERROR (no closing quote) : END-OF-LINE encountered at Line " +
+                            to_string(eLine) + " Column " + to_string(eColumn)
+                    );
                 }
                 value += advance();
             }
         }
-
-        if (isAtEnd())
-            throw EOFException();
 
         value += '"';
 
@@ -439,7 +287,7 @@ private:
     // Scan the token
     Token scanToken(char first) {
         string value(1, first);
-        while (!isAtEnd() && isSymbolChar(peek()))
+        while (isSymbolChar(peek()))
             value += advance();
 
         if (isNumber(value))
@@ -502,12 +350,35 @@ private:
 
     // Check if the given character is a symbol character
     static bool isSymbolChar(char c) {
-        return isalpha(c) || isdigit(c) || string("!?-+*/><=_~#@$%.^&").find(c) != string::npos;
+        return isalpha(c) || isdigit(c) || string("!?-+*/><=_~#@$%.^&,").find(c) != string::npos;
+    }
+
+    // Advance the current position and return the character
+    char advance() {
+        if (cin.peek() == EOF)
+            throw EOFException();
+
+        if (peek() == '\n') {
+            line++;
+            column = 0;
+        }
+
+        else
+            column++;
+
+        buffer += peek();
+
+        return static_cast<char>(cin.get());
+    }
+
+    // Return the current character without advancing the position
+    [[nodiscard]] static char peek() {
+        return static_cast<char>(cin.peek());
     }
 
     // Skip the whitespace characters
     void skipWhitespace() {
-        while (!isAtEnd()) {
+        while (true) {
             char c = peek();
             if (isspace(c))
                 advance();
@@ -517,30 +388,134 @@ private:
         }
     }
 
-    // Advance the current position and return the character
-    char advance() {
-        if (peek() == '\n') {
-            line++;
-            column = 0;
+    void putback(char c) {
+        cin.putback(c);
+    }
+};
+
+// Parser class to parse the tokens and build the AST
+class Parser {
+public:
+    explicit Parser() {
+        scanner = Scanner();
+    }
+
+    shared_ptr<Node> parse() {
+        return parseExpression();
+    }
+
+private:
+    Scanner scanner;
+
+    // Parse the expression
+    shared_ptr<Node> parseExpression() {
+        Token token = scanner.scanToken();
+        switch (token.type) {
+            case TokenType::LEFT_PAREN:
+                return parseSExpression();
+            case TokenType::QUOTE:
+//              throw RuntimeException(
+//                      "ERROR (unexpected token) : missing expression after ' at Line " +
+//                      to_string(token.line) + " Column " + to_string(token.column)
+//                      );
+                return make_shared<QuoteNode>(parseExpression());
+            case TokenType::INT:
+            case TokenType::FLOAT:
+            case TokenType::STRING:
+            case TokenType::SYMBOL:
+            case TokenType::NIL:
+            case TokenType::T:
+                return make_shared<AtomNode>(token.type, token.value);
+            default:
+                throw RuntimeException(
+                        "ERROR (unexpected token) : atom or '(' expected when token at Line " +
+                        to_string(token.line) + " Column " + to_string(token.column) +
+                        " is >>" + token.value + "<<"
+                        );
+        }
+    }
+
+    // Parse the S-expression
+    // <S-exp> ::= <ATOM>
+    //    | LEFT-PAREN <S-exp> { <S-exp> } [ DOT <S-exp> ] RIGHT-PAREN
+    //    | QUOTE <S-exp>
+    shared_ptr<Node> parseSExpression() {
+        // Handle empty list case: ()
+        if (scanner.peekToken().type == TokenType::RIGHT_PAREN) {
+            scanner.scanToken();
+            return make_shared<AtomNode>(TokenType::NIL, "nil");
         }
 
-        else
-            column++;
+        // Parse the first expression (required)
+        auto firstExpr = parseExpression();
 
-        if (isAtEnd())
-            return '\0';
+        // If we hit the closing paren, it's a single element list
+        if (scanner.peekToken().type == TokenType::RIGHT_PAREN) {
+            scanner.scanToken(); // skip ')'
+            // Create a proper list with one element
+            return make_shared<DotNode>(firstExpr, make_shared<AtomNode>(TokenType::NIL, "nil"));
+        }
 
-        return input[current++];
-    }
+        // Parse remaining expressions until DOT or RIGHT_PAREN
+        vector<shared_ptr<Node>> restExpressions;
+        while (scanner.peekToken().type != TokenType::RIGHT_PAREN &&
+               scanner.peekToken().type != TokenType::DOT) {
+            restExpressions.push_back(parseExpression());
+        }
 
-    // Return the current character without advancing the position
-    [[nodiscard]] char peek() const {
-        return isAtEnd() ? '\0' : input[current];
-    }
+        // Check if we have a dotted pair
+        if (scanner.peekToken().type == TokenType::DOT) {
+            scanner.scanToken(); // skip the dot
 
-    // Check if the current position is at the end
-    [[nodiscard]] bool isAtEnd() const {
-        return current >= input.length();
+            // Parse the expression after the dot
+            auto rightExpr = parseExpression();
+
+//            // Ensure dotted pair item
+//            if (!rightExpr) {
+//                throw RuntimeException(
+//                        "ERROR (unexpected token) : atom or '(' expected at Line " +
+//                        to_string(tokens[current].line) + " Column " + to_string(tokens[current].column)
+//                );
+//            }
+
+            // Ensure closing parenthesis
+            if (scanner.peekToken().type != TokenType::RIGHT_PAREN) {
+                scanner.scanToken();
+                throw RuntimeException(
+                        "ERROR (unexpected token) : ')' expected at Line " +
+                        to_string(scanner.peekToken().line) + " Column " + to_string(scanner.peekToken().column)
+                        );
+            }
+            scanner.scanToken(); // skip ')'
+
+            // Build the result - first build the left side chain
+            shared_ptr<Node> result = rightExpr;
+            for (int i = restExpressions.size() - 1; i >= 0; i--) {
+                result = make_shared<DotNode>(restExpressions[i], result);
+            }
+            // Then add the first expression at the beginning
+            return make_shared<DotNode>(firstExpr, result);
+        }
+
+        // It's a proper list (not a dotted pair)
+        else {
+            if (scanner.peekToken().type != TokenType::RIGHT_PAREN) {
+                scanner.scanToken();
+                throw RuntimeException("ERROR (unexpected token) : ')' expected at Line "
+                                    + to_string(scanner.peekToken().line) + " Column "
+                                    + to_string(scanner.peekToken().column));
+            }
+            scanner.scanToken(); // skip ')'
+
+            // Build a proper list - all nodes linked with the last pointing to nil
+            shared_ptr<Node> result = make_shared<AtomNode>(TokenType::NIL, "nil");
+            for (int i = restExpressions.size() - 1; i >= 0; i--) {
+                result = make_shared<DotNode>(restExpressions[i], result);
+            }
+
+            // Add the first expression
+            return make_shared<DotNode>(firstExpr, result);
+        }
     }
 };
 
@@ -602,7 +577,6 @@ private:
     }
 };
 
-
 // Helper function to check whether the S-expression is exactly (exit)
 bool isExitExpression(const shared_ptr<Node>& node) {
     // We assume (exit) is represented as a proper list with one element "exit"
@@ -630,61 +604,24 @@ int main() {
         // Ignore the newline after the test case input
         cin.ignore();
 
-        string buffer;
         while (true) {
             try {
-                // Is EOF, print error message and exit the program
-                if (cin.peek() == EOF)
-                    throw EOFException();
-
-                // Read input line by line
-                string line;
-                getline(cin, line);
-
-                if (line.empty())
-                    continue;
-
-                // Append the line to the buffer
-                buffer += line + "\n";
-
-                // Get tokens
-                Scanner scanner(buffer);
-                vector<Token> tokens = scanner.scanTokens();
-
-                // Handle if expression completed
-                int balance = 0;
-                for (const auto& token : tokens) {
-                    if (token.type == TokenType::LEFT_PAREN)
-                        balance++;
-                    else if (token.type == TokenType::RIGHT_PAREN)
-                        balance--;
-                }
-
-                // Expression not complete, keep reading input
-                if (balance > 0 ||
-                    tokens[0].type == TokenType::EOF_TOKEN ||
-                    (tokens[0].type == TokenType::QUOTE && tokens[1].type == TokenType::EOF_TOKEN))
-                    continue;
-
                 // Parse the tokens if the expression is complete
-                Parser parser(tokens);
-                while (parser.hasMore()) {
-                    shared_ptr<Node> ast = parser.parse();
+                Parser parser;
+                shared_ptr<Node> ast = parser.parse();
 
-                    cout << endl << "> ";
+                cout << endl << "> ";
 
-                    // If the parsed expression is "(exit)", throw exception to exit
-                    if (isExitExpression(ast))
-                        throw ExitException();
+                // If the parsed expression is "(exit)", throw exception to exit
+                if (isExitExpression(ast))
+                    throw ExitException();
 
-                    cout << Printer::print(ast) << endl;
-                }
-
-                buffer.clear();
+                cout << Printer::print(ast) << endl;
 
             } catch (const RuntimeException& e) {
+                string line;
+                getline(cin, line);
                 cout << endl << "> " << e.what() << endl;
-                buffer.clear();
             }
         }
 
@@ -693,7 +630,6 @@ int main() {
     } catch (const ExitException& e) {
 
     }
-
     cout << endl << "Thanks for using OurScheme!";
     return 0;
 }
