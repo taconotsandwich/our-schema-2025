@@ -3,3 +3,34 @@
        z)              ; adds its return-value with 'z' and then
                        ; return the resulting value
    ))
+
+(define (f z)  ; a function named 'f', which has one parameter 'z'
+
+   (let ((x 5))  ; let 'x' (a "local identifier") be 5
+
+    (define foo (lambda (y) (bar x y))) ; 'foo' is a "local" function
+                                        ; for any input 'y',
+                                        ; 'foo' returns (bar x y)
+
+    (define bar (lambda (a b) (+ (* a b) a))););. a).) ; 'bar' a local function too
+                                        ; for any input pair 'a' and 'b',
+                                        ; return (+ (* a b) a)
+
+    (+ (foo (+ x 3))   ; this function 'f' calls 'foo',
+       z)              ; adds its return-value with 'z' and then
+                       ; return the resulting value
+   )) (
+        1 . 2
+      )
+(define (f z)  ; a function named 'f', which has one parameter 'z'
+
+   (let ((x 5))  ; let 'x' (a "local identifier") be 5
+
+    (define foo (lambda (y) (bar x y))) ; 'foo' is a "local" function
+                                        ; for any input 'y',
+                                        ; 'foo' returns (bar x y)
+
+    (define bar (lambda (a b) (+ (* a b) a)))). a b).) ; 'bar' a local function too
+                                        ; for any input pair 'a' and 'b',
+                                        ; return (+ (* a b) a)
+
