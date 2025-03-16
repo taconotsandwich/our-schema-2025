@@ -201,7 +201,7 @@ public:
 
     explicit Scanner() {
         line = 1;
-        column = 1;
+        column = 0;
     }
 
     // Scan the input and return the tokens
@@ -220,6 +220,7 @@ public:
             case ';':
                 while (peek() != '\n')
                     advance();
+                advance();
                 return scanToken();
             default:
                 return scanToken(c);
@@ -268,19 +269,17 @@ private:
                 }
             } else {
                 if (peek() == '\n') {
-                    int eLine = line, eColumn = column + 1;
                     throw RuntimeException(
                             "ERROR (no closing quote) : END-OF-LINE encountered at Line " +
-                            to_string(eLine) + " Column " + to_string(eColumn)
+                            to_string(line) + " Column " + to_string(column + 1)
                     );
                 }
                 value += advance();
             }
         }
 
-        value += '"';
+        value += advance();
 
-        advance();
         return Token(TokenType::STRING, value, line, column);
     }
 
@@ -300,8 +299,9 @@ private:
     // Scan the number token
     [[nodiscard]] Token scanNumber(const string& value) const {
         bool isFloat = value.find('.') != string::npos;
-        return isFloat ? Token(TokenType::FLOAT, value, line, column)
-                       : Token(TokenType::INT, value, line, column);
+        return isFloat ?
+            Token(TokenType::FLOAT, value, line, column) :
+                Token(TokenType::INT, value, line, column);
     }
 
     // Scan the symbol token
@@ -358,7 +358,7 @@ private:
         if (cin.peek() == EOF)
             throw EOFException();
 
-        if (peek() == '\n') {
+        else if (peek() == '\n') {
             line++;
             column = 0;
         }
@@ -388,7 +388,7 @@ private:
         }
     }
 
-    void putback(char c) {
+    static void putback(char c) {
         cin.putback(c);
     }
 };
@@ -470,20 +470,12 @@ private:
             // Parse the expression after the dot
             auto rightExpr = parseExpression();
 
-//            // Ensure dotted pair item
-//            if (!rightExpr) {
-//                throw RuntimeException(
-//                        "ERROR (unexpected token) : atom or '(' expected at Line " +
-//                        to_string(tokens[current].line) + " Column " + to_string(tokens[current].column)
-//                );
-//            }
-
             // Ensure closing parenthesis
             if (scanner.peekToken().type != TokenType::RIGHT_PAREN) {
-                scanner.scanToken();
+                Token token = scanner.scanToken();
                 throw RuntimeException(
                         "ERROR (unexpected token) : ')' expected at Line " +
-                        to_string(scanner.peekToken().line) + " Column " + to_string(scanner.peekToken().column)
+                        to_string(token.line) + " Column " + to_string(token.column)
                         );
             }
             scanner.scanToken(); // skip ')'
@@ -500,10 +492,10 @@ private:
         // It's a proper list (not a dotted pair)
         else {
             if (scanner.peekToken().type != TokenType::RIGHT_PAREN) {
-                scanner.scanToken();
+                Token token = scanner.scanToken();
                 throw RuntimeException("ERROR (unexpected token) : ')' expected at Line "
-                                    + to_string(scanner.peekToken().line) + " Column "
-                                    + to_string(scanner.peekToken().column));
+                                    + to_string(token.line) + " Column "
+                                    + to_string(token.column));
             }
             scanner.scanToken(); // skip ')'
 
