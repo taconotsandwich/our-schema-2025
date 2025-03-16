@@ -238,6 +238,20 @@ public:
         return token;
     }
 
+    static void skipIfLineLeftoverEmpty() {
+        string line;
+        getline(cin, line);
+        line += '\n';
+        if (isOnlyWhitespace(line))
+            return;
+
+        else {
+            reverse(line.begin(), line.end());
+            for (char c : line)
+                putback(c);
+        }
+    }
+
 private:
     string buffer;
 
@@ -279,7 +293,6 @@ private:
         }
 
         value += advance();
-
         return Token(TokenType::STRING, value, line, column);
     }
 
@@ -388,6 +401,10 @@ private:
         }
     }
 
+    static bool isOnlyWhitespace(const string& str) {
+        return all_of(str.begin(), str.end(), [](unsigned char c) { return std::isspace(c); });
+    }
+
     static void putback(char c) {
         cin.putback(c);
     }
@@ -414,10 +431,6 @@ private:
             case TokenType::LEFT_PAREN:
                 return parseSExpression();
             case TokenType::QUOTE:
-//              throw RuntimeException(
-//                      "ERROR (unexpected token) : missing expression after ' at Line " +
-//                      to_string(token.line) + " Column " + to_string(token.column)
-//                      );
                 return make_shared<QuoteNode>(parseExpression());
             case TokenType::INT:
             case TokenType::FLOAT:
@@ -459,9 +472,8 @@ private:
         // Parse remaining expressions until DOT or RIGHT_PAREN
         vector<shared_ptr<Node>> restExpressions;
         while (scanner.peekToken().type != TokenType::RIGHT_PAREN &&
-               scanner.peekToken().type != TokenType::DOT) {
+               scanner.peekToken().type != TokenType::DOT)
             restExpressions.push_back(parseExpression());
-        }
 
         // Check if we have a dotted pair
         if (scanner.peekToken().type == TokenType::DOT) {
@@ -474,17 +486,18 @@ private:
             if (scanner.peekToken().type != TokenType::RIGHT_PAREN) {
                 Token token = scanner.scanToken();
                 throw RuntimeException(
-                        "ERROR (unexpected token) : ')' expected at Line " +
-                        to_string(token.line) + " Column " + to_string(token.column)
+                        "ERROR (unexpected token) : ')' expected when token at Line " +
+                        to_string(token.line) + " Column " + to_string(token.column) +
+                        " is >>" + token.value + "<<"
                         );
             }
             scanner.scanToken(); // skip ')'
 
             // Build the result - first build the left side chain
             shared_ptr<Node> result = rightExpr;
-            for (int i = restExpressions.size() - 1; i >= 0; i--) {
+            for (int i = restExpressions.size() - 1; i >= 0; i--)
                 result = make_shared<DotNode>(restExpressions[i], result);
-            }
+
             // Then add the first expression at the beginning
             return make_shared<DotNode>(firstExpr, result);
         }
@@ -493,9 +506,10 @@ private:
         else {
             if (scanner.peekToken().type != TokenType::RIGHT_PAREN) {
                 Token token = scanner.scanToken();
-                throw RuntimeException("ERROR (unexpected token) : ')' expected at Line "
-                                    + to_string(token.line) + " Column "
-                                    + to_string(token.column));
+                throw RuntimeException(
+                        "ERROR (unexpected token) : ')' expected when token at Line " +
+                        to_string(token.line) + " Column " + to_string(token.column) +
+                        " is >>" + token.value + "<<" );
             }
             scanner.scanToken(); // skip ')'
 
@@ -610,6 +624,7 @@ int main() {
 
                 cout << Printer::print(ast) << endl;
 
+                Scanner::skipIfLineLeftoverEmpty();
             } catch (const RuntimeException& e) {
                 string line;
                 getline(cin, line);
