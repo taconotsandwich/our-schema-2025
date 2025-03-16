@@ -241,6 +241,7 @@ public:
     static void skipIfLineLeftoverEmpty() {
         string line;
         getline(cin, line);
+        line = splitStringAtFirstSemicolon(line);
         line += '\n';
         if (isOnlyWhitespace(line))
             return;
@@ -403,6 +404,18 @@ private:
 
     static bool isOnlyWhitespace(const string& str) {
         return all_of(str.begin(), str.end(), [](unsigned char c) { return std::isspace(c); });
+    }
+
+    static string splitStringAtFirstSemicolon(const string& line) {
+        size_t pos = line.find(';');
+
+        if (pos != std::string::npos) {
+            string firstPart = line.substr(0, pos), secondPart = line.substr(pos + 1);
+
+            return firstPart;
+        }
+
+        return line;
     }
 
     static void putback(char c) {
