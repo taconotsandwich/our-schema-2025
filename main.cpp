@@ -709,21 +709,6 @@ bool isExitExpression(const shared_ptr<Node>& node) {
     return (atomLeft->getValue() == "exit" && atomRight->getValue() == "nil");
 }
 
-shared_ptr<Node> createSublist(const shared_ptr<Node>& original) {
-    vector<shared_ptr<Node>> elems = unrollList(original);
-
-    if (elems.size() <= 3) {
-        throw RuntimeException("Original list does not have enough elements.");
-    }
-
-    shared_ptr<Node> sublist = make_shared<AtomNode>(TokenType::NIL, "nil");
-    for (int i = elems.size() - 2; i >= 3; --i) {
-        sublist = make_shared<DotNode>(elems[i], sublist);
-    }
-
-    return sublist;
-}
-
 shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
     // For quoted expressions using the shorthand: return the inner expression unchanged.
     if (auto quote = dynamic_pointer_cast<QuoteNode>(node))
@@ -737,7 +722,7 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
             // If the symbol is bound in the built environment, return a placeholder
             // Otherwise, throw error.
             if (globalEnv.find(sym) != globalEnv.end())
-                return globalEnv[sym];
+                return EvalSExp(globalEnv[sym]);
             else if (builtins.find(sym) != builtins.end())
                 return make_shared<AtomNode>(TokenType::SYMBOL, "#<procedure " + sym + ">");
             else
@@ -776,8 +761,7 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
                 string symName = atomSym->getValue();
                 if (builtins.find(symName) != builtins.end())
                     throw RuntimeException("ERROR (DEFINE format) : ( define " + symName + " ... )");
-                auto val = EvalSExp(elems[2]);
-                globalEnv[symName] = val;
+                globalEnv[symName] = elems[2];
                 return make_shared<AtomNode>(TokenType::SYMBOL, symName + " defined");
             } else
                 throw RuntimeException("ERROR (DEFINE format) : ( define ... )");
@@ -1322,9 +1306,9 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
             else
                 return make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-        else {
-            throw RuntimeException("ERROR (attempt to apply non-function) : " + op);
-        }
+
+        else
+            return node;
     }
 
     throw RuntimeException("ERROR (unknown expression) : " + node->toString());

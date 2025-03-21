@@ -1,2 +1,257 @@
 1
-(quote (3 (4 5)))
+(define a (cons 3 a))
+(cons (cons 5 a) a)
+a
+(car (car (cons a a)))
+(cdr (list a a (car (car (cons a a)))))
+(define a (cdr (list a a (car (car (cons a a)))))
+)
+(car (cdr a))
+(cons (car (cdr (cdr (car a))))
+      (cdr a)
+)
+(define a
+ (list (car (cdr a))
+       (cons (car (cdr (cdr (car a))))
+             (cdr a)
+       )
+       (car (cdr a))
+ )
+)
+a
+(define b a)
+(define b (cons (list a b) a))
+b
+(cons (car b) (car (cdr b)))
+
+; ------- functional compositions (same category) -------
+
+(define a 5)
+(define b 10)
+(define c 20)
+(define list1 '(11 22 33))
+(define list2 '(12 23 34))
+(define str1 "abc")
+(define str2 (string-append "d" "de"))
+(define var1
+ (- ( + (- a b) (* c a 3)
+    )
+    (* a (+ b c (car list1)))
+    (car (cdr list2))
+ )
+)
+(>= var1 (car (cdr (cdr list2))))
+(string>? (string-append "Hello" str1)
+          str2
+)
+(not (> a 3))
+; etc.
+
+; ------- functional compositions (different categories) -------
+
+(cons
+  (cons (+ 30 50)
+        (cdr '(The sun shines bright))
+  )
+  (list (null? '())
+        (pair? '(30 (40)))
+        (- (+ 5 7) (+ 2 3))
+        '(1 2 . (3))
+  )
+)
+(if (> a b)
+    (* a
+      (+ (car list1)
+         (car (cdr list2)))
+    )
+    (* b
+      (+ (car list2)
+         (car (cdr list1)))
+    )
+)
+(if (not (> a b))
+    (* a
+      (+ (car list1)
+         (car (cdr list2)))
+    )
+    (* b
+      (+ (car list2)
+         (car (cdr list1)))
+    )
+)
+
+(define d 20)
+(begin
+   3 4 d)
+(begin
+   (+ 3 5)
+   (- 4 5)
+   (* d d)
+)
+(define a 20)
+(define b 40)
+(list
+     ( if (> a b)
+          (+ a (* a b))
+          (- b (+ a a))
+     )
+
+          ( begin
+            (- b (+ a a))
+            (> 70 b)
+          )
+)
+(if #t (begin 3 4 5))
+(cond ((> 5 3) 'good 'better 'best) (#t 'OK?)   )
+(define a (+ a b a))
+
+(cond ( (> a b) (+ a b) (- a b) (* a b) )
+      (  else 'OK? )
+)
+
+(cond ( (< a b)
+        (+ a b) (- a b) (- a Look!) (* a b)
+      )
+      (  else
+         ( list 'OK? 'Correct? )
+         ( cons 'OK? 'Correct? )
+      )
+)
+
+; =============== Problem 5 可見數據 ====================
+(define a "=============== Problem 5 viewable case =================")
+a
+
+(clean-environment)
+
+; ------- Some newly added stuff -------
+
+; In OurScheme (and Lisp too), there is no discrimination against
+; functions
+
+cons ; the binding of this (primitive) symbol is a function
+car  ; the binding of this (primitive) symbol is also a function
+
+(define myCons cons) ; just like int/float/string can be the binding
+(define myCar car)   ; of a symbol, a function can be a binding too
+
+myCons ; what is the (current) binding of this symbol?
+
+(myCons cons myCar) ; the evaluated result of 'myCons' is a function
+(myCons 3 '(4 myCar))
+
+((myCar (cons myCons cons)) '(10) 20)
+
+
+
+
+
+(begin
+   (myCar '(1 2 3))
+   (cdr '(1 2 3))
+   (car (cdr '(1 (20 myCons))))
+)
+
+(begin
+   (list (list 1 - 3 +)
+         (myCons 25 car)
+   )
+)
+((myCar (cons myCons cons))
+ (cdr (cdr '(Hi! (How is) (it) going ?)
+      )
+ )
+ (cdr '(Hi! (How is) (it) going ?)
+ )
+)
+
+
+(define >? string>?)
+(define <? string<?)
+(define =? string=?)
+
+(define first "CYCU")
+(define second "NCU")
+(define third "NSYU")
+
+(define cc
+        (if (>? first second)
+            "Good"
+            (if (<? first second)
+                "Bad"
+                "So So"
+            )
+        )
+)
+cc
+
+(if (=? second first)
+    "Really?"
+    (if (>? second first)
+        "OK."
+        (if (<? second first)
+            "Must be."
+            "Impossible."
+        )
+    )
+)
+
+(cons 'Whether (cdr (cdr '(To be or not to be ?)))
+)
+
+(cdr (car (cons '(That is the question !) ()
+          )
+     )
+)
+(cdr (cdr (list "Hi," " Everybody!" "Wake up!")))
+(define sun-shine '(The sun shines bright))
+(define money 50)
+
+(cons (- (+ 30 money) 40)
+      (cdr (cdr sun-shine))
+)
+(define a 20)
+(define d 20)
+(define b 40)
+(if (> a (+ b d))
+    +
+    /
+)
+(+ d
+   ( if (> a b)
+        (+ a (* a b))
+        (- b (+ a a))
+   )
+)
+(+ d
+   ( if (> a b)
+        (+ a (* a b))
+        ( begin
+          (- b (+ a a))
+          70
+        )
+   )
+)
+(if #t (begin 3 4 a) (begin 6 7))
+(cond ( (> b a) "Good" "Better" "Best")
+        ( else 'Never 'let 'it 'rest!)   )
+(define a (+ a b a))
+
+(cond ( (> (* a 2) (* b 2)) (+ a b) (+ (- a b) (* a b)) )
+      ( (> a b) Look! )
+      ( (< 20 10) It's a bird !)
+      (  It's a plane ! )
+      (  #t It's Superman !  )
+)
+
+(cond ( (< a b)
+        (+ a b) (- a b) (- a Look!) (* a b)
+      )
+      (  #t
+         ( list
+                ( list 'OK? 'Correct? )
+                ( list 'OK? 'Correct? )
+         )
+      )
+)
+
