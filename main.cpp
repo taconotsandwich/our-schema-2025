@@ -728,7 +728,7 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
                 return make_shared<AtomNode>(TokenType::SYMBOL, "#<procedure " + sym + ">");
 
             else
-                throw RuntimeException("ERROR (attempt to apply non-function) : " + node->toString());
+                throw RuntimeException("ERROR (unbound symbol) : " + node->toString());
         }
         return node;
     }
@@ -746,11 +746,17 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
         if (auto atomOp = dynamic_pointer_cast<AtomNode>(opNode))
             op = atomOp->getValue();
 
-        else if (opNode)
-            op = opNode->toString();
+        else
+            op = dynamic_pointer_cast<AtomNode>(EvalSExp(opNode))->getValue();
 
         while (globalEnv.find(op) != globalEnv.end() && builtins.find(op) == builtins.end()) {
             op = globalEnv[op]->toString();
+        }
+
+        if (op.find("#<procedure ") != string::npos) {
+            const string prefix = "#<procedure ";
+            const string suffix = ">";
+            op = op.substr(prefix.size(), op.size() - prefix.size() - suffix.size());
         }
 
         // --- Special Forms ---
@@ -766,8 +772,9 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
                     throw RuntimeException("ERROR (DEFINE format) : ( define " + symName + " ... )");
                 globalEnv[symName] = EvalSExp(elems[2]);
                 return make_shared<AtomNode>(TokenType::SYMBOL, symName + " defined");
-            } else
-                throw RuntimeException("ERROR (DEFINE format) : ( define ... )");
+            }
+            else
+                throw RuntimeException("ERROR (DEFINE format) : ( define " + Printer::print(symNode) + " )");
         }
 
         else if (op == "if") {
@@ -1312,7 +1319,7 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
         }
 
         else
-            return node;
+            throw RuntimeException("ERROR (unbound symbol) : " + node->toString());
     }
 
     throw RuntimeException("ERROR (unknown expression) : " + node->toString());
@@ -1331,14 +1338,13 @@ int main() {
                 // Parse the tokens if the expression is complete
                 Parser parser;
                 shared_ptr<Node> ast = parser.parse();
+                shared_ptr<Node> result = EvalSExp(ast);
 
                 cout << endl << "> ";
+//                // If the parsed expression is "(exit)", throw exception to exit
+//                if (isExitExpression(ast))
+//                    throw ExitException();
 
-                // If the parsed expression is "(exit)", throw exception to exit
-                if (isExitExpression(ast))
-                    throw ExitException();
-
-                shared_ptr<Node> result = EvalSExp(ast);
                 cout << Printer::print(result) << endl;
 
                 Scanner::skipIfLineLeftoverEmpty();
@@ -1352,7 +1358,7 @@ int main() {
     } catch (const EOFException& e) {
         cout << endl << "> " << e.what();
     } catch (const ExitException& e) {
-
+        cout << endl << "> ";
     }
     cout << endl << "Thanks for using OurScheme!";
     return 0;
