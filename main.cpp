@@ -722,9 +722,11 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
             // If the symbol is bound in the built environment, return a placeholder
             // Otherwise, throw error.
             if (globalEnv.find(sym) != globalEnv.end())
-                return EvalSExp(globalEnv[sym]);
+                return globalEnv[sym];
+
             else if (builtins.find(sym) != builtins.end())
                 return make_shared<AtomNode>(TokenType::SYMBOL, "#<procedure " + sym + ">");
+
             else
                 throw RuntimeException("ERROR (attempt to apply non-function) : " + node->toString());
         }
@@ -734,6 +736,7 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
     // For list expressions (function applications).
     if (dynamic_pointer_cast<DotNode>(node)) {
         vector<shared_ptr<Node>> elems = unrollList(node);
+
         if (elems.empty())
             throw RuntimeException("ERROR (attempt to apply non-function) : " + node->toString());
 
@@ -742,12 +745,12 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
         string op;
         if (auto atomOp = dynamic_pointer_cast<AtomNode>(opNode))
             op = atomOp->getValue();
-        else {
-            opNode = EvalSExp(opNode);
-            if (auto atomOp2 = dynamic_pointer_cast<AtomNode>(opNode))
-                op = atomOp2->getValue();
-            else
-                throw RuntimeException("ERROR (attempt to apply non-function) : " + opNode->toString());
+
+        else if (opNode)
+            op = opNode->toString();
+
+        while (globalEnv.find(op) != globalEnv.end() && builtins.find(op) == builtins.end()) {
+            op = globalEnv[op]->toString();
         }
 
         // --- Special Forms ---
@@ -761,11 +764,12 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
                 string symName = atomSym->getValue();
                 if (builtins.find(symName) != builtins.end())
                     throw RuntimeException("ERROR (DEFINE format) : ( define " + symName + " ... )");
-                globalEnv[symName] = elems[2];
+                globalEnv[symName] = EvalSExp(elems[2]);
                 return make_shared<AtomNode>(TokenType::SYMBOL, symName + " defined");
             } else
                 throw RuntimeException("ERROR (DEFINE format) : ( define ... )");
         }
+
         else if (op == "if") {
             if (elems.size() != 3 && elems.size() != 4)
                 throw RuntimeException("ERROR (if format) : ( if ... )");
