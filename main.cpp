@@ -626,7 +626,7 @@ vector<shared_ptr<Node>> unrollList(const shared_ptr<Node>& list) {
             if (atom && atom->getValue() == "nil")
                 break;
             else
-                throw RuntimeException("ERROR (non-list) : " + curr->toString());
+                throw RuntimeException("ERROR (non-list) : " + Printer::print(list));
         }
     }
     return elems;
@@ -709,7 +709,7 @@ bool isExitExpression(const shared_ptr<Node>& node) {
     return (atomLeft->getValue() == "exit" && atomRight->getValue() == "nil");
 }
 
-shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
+shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
     // For quoted expressions using the shorthand: return the inner expression unchanged.
     if (auto quote = dynamic_pointer_cast<QuoteNode>(node))
         return quote->getExpression();
@@ -747,11 +747,14 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
             op = atomOp->getValue();
 
         else
-            op = dynamic_pointer_cast<AtomNode>(EvalSExp(opNode))->getValue();
+            op = dynamic_pointer_cast<AtomNode>(EvalSExp(false, opNode))->getValue();
 
-        while (globalEnv.find(op) != globalEnv.end() && builtins.find(op) == builtins.end()) {
+        // If symbol is not defined in environment, throw error
+        if (globalEnv.find(op) == globalEnv.end() && builtins.find(op) == builtins.end())
+            throw RuntimeException("ERROR (attempt to apply non-function) : " + op);
+
+        while (globalEnv.find(op) != globalEnv.end() && builtins.find(op) == builtins.end())
             op = globalEnv[op]->toString();
-        }
 
         if (op.find("#<procedure ") != string::npos) {
             const string prefix = "#<procedure ";
@@ -761,36 +764,42 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
 
         // --- Special Forms ---
         if (op == "define") {
+            if (!isGlobalLayer)
+                throw RuntimeException("ERROR (level of DEFINE)");
+
             if (elems.size() != 3)
-                throw RuntimeException("ERROR (DEFINE format) : ( define ... )");
+                throw RuntimeException("ERROR (DEFINE format) : " + Printer::print(node));
+
             auto symNode = elems[1];
+
             if (auto atomSym = dynamic_pointer_cast<AtomNode>(symNode)) {
                 if (atomSym->getType() != TokenType::SYMBOL)
-                    throw RuntimeException("ERROR (DEFINE format) : ( define " + symNode->toString());
+                    throw RuntimeException("ERROR (DEFINE format) : " + Printer::print(node));
                 string symName = atomSym->getValue();
                 if (builtins.find(symName) != builtins.end())
-                    throw RuntimeException("ERROR (DEFINE format) : ( define " + symName + " ... )");
-                globalEnv[symName] = EvalSExp(elems[2]);
+                    throw RuntimeException("ERROR (DEFINE format) : " + Printer::print(node));
+                globalEnv[symName] = EvalSExp(false, elems[2]);
                 return make_shared<AtomNode>(TokenType::SYMBOL, symName + " defined");
             }
+
             else
-                throw RuntimeException("ERROR (DEFINE format) : ( define " + Printer::print(symNode) + " )");
+                throw RuntimeException("ERROR (DEFINE format) : " + Printer::print(node));
         }
 
         else if (op == "if") {
             if (elems.size() != 3 && elems.size() != 4)
                 throw RuntimeException("ERROR (if format) : ( if ... )");
-            auto condVal = EvalSExp(elems[1]);
+            auto condVal = EvalSExp(false, elems[1]);
             bool condTrue;
             if (auto atomCond = dynamic_pointer_cast<AtomNode>(condVal))
                 condTrue = (atomCond->getValue() != "nil");
             else
                 condTrue = true;
             if (condTrue)
-                return EvalSExp(elems[2]);
+                return EvalSExp(false, elems[2]);
             else {
                 if (elems.size() == 4)
-                    return EvalSExp(elems[3]);
+                    return EvalSExp(false, elems[3]);
                 else
                     throw RuntimeException("ERROR (no return value) : ( if nil " + elems[2]->toString() + ")");
             }
@@ -812,7 +821,7 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
                     dynamic_pointer_cast<AtomNode>(firstElem)->getValue() == "else") {
                     testMatches = true;
                 } else {
-                    auto testVal = EvalSExp(firstElem);
+                    auto testVal = EvalSExp(false, firstElem);
                     if (auto atomTest = dynamic_pointer_cast<AtomNode>(testVal))
                         testMatches = (atomTest->getValue() != "nil");
                     else
@@ -824,7 +833,7 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
                         throw RuntimeException("ERROR (no return value) : ( cond ... )");
                     shared_ptr<Node> res;
                     for (size_t j = 1; j < clauseElems.size(); j++)
-                        res = EvalSExp(clauseElems[j]);
+                        res = EvalSExp(false, clauseElems[j]);
                     return res;
                 }
             }
@@ -835,10 +844,12 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
                 throw RuntimeException("ERROR (begin format) : ( begin ... )");
             shared_ptr<Node> res;
             for (size_t i = 1; i < elems.size(); i++)
-                res = EvalSExp(elems[i]);
+                res = EvalSExp(false, elems[i]);
             return res;
         }
         else if (op == "clean-environment") {
+            if (!isGlobalLayer)
+                throw RuntimeException("ERROR (level of CLEAN-ENVIRONMENT)");
             if (elems.size() != 1)
                 throw RuntimeException("ERROR (incorrect number of arguments) : clean-environment");
             globalEnv.clear();
@@ -857,7 +868,7 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
         else if (op == "not") {
             if (elems.size() != 2)
                 throw RuntimeException("ERROR (incorrect number of arguments) : not");
-            auto testVal = EvalSExp(elems[1]);
+            auto testVal = EvalSExp(false, elems[1]);
             bool truth;
             if (auto atom = dynamic_pointer_cast<AtomNode>(testVal))
                 truth = (atom->getValue() != "nil");
@@ -871,7 +882,7 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
                 throw RuntimeException("ERROR (incorrect number of arguments) : and");
             shared_ptr<Node> lastEvaluated;
             for (size_t i = 1; i < elems.size(); i++) {
-                lastEvaluated = EvalSExp(elems[i]);
+                lastEvaluated = EvalSExp(false, elems[i]);
                 bool truth;
                 if (auto atom = dynamic_pointer_cast<AtomNode>(lastEvaluated))
                     truth = (atom->getValue() != "nil");
@@ -886,7 +897,7 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
             if (elems.size() < 2)
                 throw RuntimeException("ERROR (incorrect number of arguments) : or");
             for (size_t i = 1; i < elems.size(); i++) {
-                auto val = EvalSExp(elems[i]);
+                auto val = EvalSExp(false, elems[i]);
                 bool truth;
                 if (auto atom = dynamic_pointer_cast<AtomNode>(val))
                     truth = (atom->getValue() != "nil");
@@ -901,7 +912,7 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
         // Evaluate operands for the remaining built-in functions.
         vector<shared_ptr<Node>> args;
         for (size_t i = 1; i < elems.size(); i++)
-            args.push_back(EvalSExp(elems[i]));
+            args.push_back(EvalSExp(false, elems[i]));
 
         // --- Arithmetic Operations ---
         if (op == "+") {
@@ -1319,7 +1330,7 @@ shared_ptr<Node> EvalSExp(const shared_ptr<Node>& node) {
         }
 
         else
-            throw RuntimeException("ERROR (unbound symbol) : " + node->toString());
+            throw RuntimeException("ERROR (unbound symbol) : " + op);
     }
 
     throw RuntimeException("ERROR (unknown expression) : " + node->toString());
@@ -1338,7 +1349,7 @@ int main() {
                 // Parse the tokens if the expression is complete
                 Parser parser;
                 shared_ptr<Node> ast = parser.parse();
-                shared_ptr<Node> result = EvalSExp(ast);
+                shared_ptr<Node> result = EvalSExp(true, ast);
 
                 cout << endl << "> ";
 //                // If the parsed expression is "(exit)", throw exception to exit

@@ -1,137 +1,86 @@
 1
-; =============== Problem 5 可見數據 ====================
-(define a "=============== Problem 5 viewable case =================")
+; =============== Problem 8 可見數據 ====================
+ab
+(define a "=============== Problem 8 viewable case =================")
 a
 
 (clean-environment)
 
-; ------- Some newly added stuff -------
+a
+(cons (clean-environment) a)
 
-; In OurScheme (and Lisp too), there is no discrimination against
-; functions
+; when the being evaluated S-expr is an atom, the result is that atom
+; (in our standard print-form)
 
-cons ; the binding of this (primitive) symbol is a function
-car  ; the binding of this (primitive) symbol is also a function
++3 -.12548 "Hi\n\"
 
-(define myCons cons) ; just like int/float/string can be the binding
-(define myCar car)   ; of a symbol, a function can be a binding too
+; when a function is being evaluated, the parameters of this function
+; are evaluated BEFORE this function is "applied"
+; to the evaluated results (of the parameters)
 
-myCons ; what is the (current) binding of this symbol?
+; 1. A list (or rather, a dotted pair) is CONSTRUCTED.
 
-(myCons cons myCar) ; the evaluated result of 'myCons' is a function
-(myCons 3 '(4 myCar))
+(cons 3 4)     ; an operation on two objects
+(cons 3
+        nil
+  )            ; '(3 . nil)' = '(3)'
+(cons 30
+        ()
+  )            ; same thing
+(cons 30
+        #f
+  )            ; same thing
+()
+(cons () nil)(cons #f #f)(cons 'nil '())
+(CONS 3 4)      ; Scheme distinquishs between upper and lower cases
+(cons hello 4)
+hello
+(CONS hello there)
+(list 1 2 3)(list)(list nil 2 3 #f)
+(list 1 2 3)(cons)(list nil 2 3 #f)
+(cons 1 2 3 ; Number of arguments should always be checked before
+              ; the evaluation of an S-expression ;
+  )           ; Once such an error is detected, no evaluation is performed ;
+(cons hello there! How are you?)
+(cons (clean-environment) ())
+(cons (clean-environment))
 
-((myCar (cons myCons cons)) '(10) 20)
+; 2. quote - a way to "by pass" the default interpretation of an S-exp
 
+(3 4 5)
+'(3 4 5)'3 . ()
+(quote (3 (4 5)))
+(cons 3
+        (4321 5))
+(cons 3 '(4321 5))
+(list 3 (4 5))
+(list 3 '(4 5))
+(list 3
+        '(4 5)
+        6
+        '(7 8))
 
+; 3. To give a (symbolic) name to an object
 
+; Meaning of DEFINE revisited ("令")
 
+; Basically, DEFINE sets up a (temporary) binding between a symbol
+; and an S-expression
 
-(begin
-   (myCar '(1 2 3))
-   (cdr '(1 2 3))
-   (car (cdr '(1 (20 myCons))))
-)
+; DEFINE sets up the binding between a name and an internal data structure
 
-(begin
-   (list (list 1 - 3 +)
-         (myCons 25 car)
-   )
-)
-((myCar (cons myCons cons))
- (cdr (cdr '(Hi! (How is) (it) going ?)
-      )
- )
- (cdr '(Hi! (How is) (it) going ?)
- )
-)
+abc
+(define a 5)   ; "令a為5"; 讓我們把"那個東西"又稱為'a'
+(define b (define a 5))  ; 'define' must appear at the toplevel
+(define 5 10)            ; first argument of 'define' must be a symbol
+(define cons 5          ; first argument of 'define' cannot be the name
+)                       ; of a primitive
+(define define 5)
+(define)
+(define a)
+(define a b c)
+(cons (define a 5) ())
+(cons (define a 5))
+(cons (clean-environment) (define a 5))
 
-
-(define >? string>?)
-(define <? string<?)
-(define =? string=?)
-
-(define first "CYCU")
-(define second "NCU")
-(define third "NSYU")
-
-(define cc
-        (if (>? first second)
-            "Good"
-            (if (<? first second)
-                "Bad"
-                "So So"
-            )
-        )
-)
-cc
-
-(if (=? second first)
-    "Really?"
-    (if (>? second first)
-        "OK."
-        (if (<? second first)
-            "Must be."
-            "Impossible."
-        )
-    )
-)
-
-(cons 'Whether (cdr (cdr '(To be or not to be ?)))
-)
-
-(cdr (car (cons '(That is the question !) ()
-          )
-     )
-)
-(cdr (cdr (list "Hi," " Everybody!" "Wake up!")))
-(define sun-shine '(The sun shines bright))
-(define money 50)
-
-(cons (- (+ 30 money) 40)
-      (cdr (cdr sun-shine))
-)
-(define a 20)
-(define d 20)
-(define b 40)
-(if (> a (+ b d))
-    +
-    /
-)
-(+ d
-   ( if (> a b)
-        (+ a (* a b))
-        (- b (+ a a))
-   )
-)
-(+ d
-   ( if (> a b)
-        (+ a (* a b))
-        ( begin
-          (- b (+ a a))
-          70
-        )
-   )
-)
-(if #t (begin 3 4 a) (begin 6 7))
-(cond ( (> b a) "Good" "Better" "Best")
-        ( else 'Never 'let 'it 'rest!)   )
-(define a (+ a b a))
-
-(cond ( (> (* a 2) (* b 2)) (+ a b) (+ (- a b) (* a b)) )
-      ( (> a b) Look! )
-      ( (< 20 10) It's a bird !)
-      (  It's a plane ! )
-      (  #t It's Superman !  )
-)
-
-(cond ( (< a b)
-        (+ a b) (- a b) (- a Look!) (* a b)
-      )
-      (  #t
-         ( list
-                ( list 'OK? 'Correct? )
-                ( list 'OK? 'Correct? )
-         )
-      )
-)
+(exit 0)
