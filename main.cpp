@@ -53,8 +53,7 @@ public:
 enum class TokenType {
     LEFT_PAREN, RIGHT_PAREN,
     INT, FLOAT, STRING, DOT,
-    NIL, T, QUOTE, SYMBOL,
-    EOF_TOKEN
+    NIL, T, QUOTE, SYMBOL
 };
 
 // Token class to store the token type, value, line, and column
@@ -100,9 +99,6 @@ public:
                 break;
             case TokenType::STRING:
                 cout << "STRING" << endl;
-                break;
-            case TokenType::EOF_TOKEN:
-                cout << "EOF_TOKEN" << endl;
                 break;
             default:
                 cout << "UNKNOWN" << endl;
@@ -630,7 +626,8 @@ vector<shared_ptr<Node>> unrollList(const shared_ptr<Node>& list) {
         if (auto dot = dynamic_pointer_cast<DotNode>(curr)) {
             elems.push_back(dot->getLeft());
             curr = dot->getRight();
-        } else {
+        }
+        else {
             auto atom = dynamic_pointer_cast<AtomNode>(curr);
             if (atom && atom->getValue() == "nil")
                 break;
@@ -654,9 +651,10 @@ double getNumber(const string& op, const shared_ptr<Node>& node) {
 bool isProperList(const shared_ptr<Node>& node) {
     auto current = node;
     while (true) {
-        if (auto dot = dynamic_pointer_cast<DotNode>(current)) {
+        if (auto dot = dynamic_pointer_cast<DotNode>(current))
             current = dot->getRight();
-        } else {
+
+        else {
             if (auto atom = dynamic_pointer_cast<AtomNode>(current))
                 return (atom->getValue() == "nil");
             return false;
@@ -733,38 +731,20 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
         // Evaluate the operator
         const auto& opNode = elems[0];
-        string op;
+        auto atomOp = dynamic_pointer_cast<AtomNode>(EvalSExp(false, opNode));
 
-        if (auto atomOp = dynamic_pointer_cast<AtomNode>(opNode)) {
-            if (atomOp->getType() != TokenType::SYMBOL)
-                throw RunTimeException("ERROR (attempt to apply non-function) : " + atomOp->getValue());
-            op = atomOp->getValue();
-        }
+        if (atomOp->getType() != TokenType::SYMBOL)
+            throw RunTimeException("ERROR (attempt to apply non-function) : " + atomOp->getValue());
 
-        else
-            op = dynamic_pointer_cast<AtomNode>(EvalSExp(false, opNode))->getValue();
+        string op = atomOp->getValue();
 
         // Look up for operator in the environment
-        while (globalEnv.find(op) != globalEnv.end() && builtins.find(op) == builtins.end())
-            op = globalEnv[op]->toString();
-
         if (op.find("#<procedure ") != string::npos) {
             const string prefix = "#<procedure ";
             const string suffix = ">";
             op = op.substr(prefix.size(), op.size() - prefix.size() - suffix.size());
         }
 
-        // If symbol is not defined in environment, throw error
-        if (globalEnv.find(op) == globalEnv.end() && builtins.find(op) == builtins.end())
-            throw RunTimeException("ERROR (unbound symbol) : " + op);
-
-        if (op.find("#<procedure ") != string::npos) {
-            const string prefix = "#<procedure ";
-            const string suffix = ">";
-            op = op.substr(prefix.size(), op.size() - prefix.size() - suffix.size());
-        }
-
-        // --- Special Forms ---
         if (op == "define") {
             if (!isGlobalLayer)
                 throw RunTimeException("ERROR (level of DEFINE)");
@@ -803,60 +783,60 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             throw ExitException();
         }
 
-        else if (op == "if") {
-            if (elems.size() != 3 && elems.size() != 4)
-                throw RunTimeException("ERROR (incorrect number of arguments) : " + op);
-            auto condVal = EvalSExp(false, elems[1]);
-            bool condTrue;
-            if (auto atomCond = dynamic_pointer_cast<AtomNode>(condVal))
-                condTrue = (atomCond->getValue() != "nil");
-            else
-                condTrue = true;
-            if (condTrue)
-                return EvalSExp(false, elems[2]);
-            else {
-                if (elems.size() == 4)
-                    return EvalSExp(false, elems[3]);
-                else
-                    throw RunTimeException("ERROR (no return value) : ( if nil " + elems[2]->toString() + ")");
-            }
-        }
-        else if (op == "cond") {
-            for (size_t i = 1; i < elems.size(); i++) {
-                vector<shared_ptr<Node>> clauseElems = unrollList(elems[i]);
-                if (clauseElems.empty())
-                    throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
-
-                bool testMatches = false;
-                bool isLastClause = (i == elems.size() - 1);
-                auto firstElem = clauseElems[0];
-
-                // If this is the last clause and its test is literally the symbol "else",
-                // then match unconditionally.
-                if (isLastClause &&
-                    dynamic_pointer_cast<AtomNode>(firstElem) &&
-                    dynamic_pointer_cast<AtomNode>(firstElem)->getValue() == "else") {
-                    testMatches = true;
-                }
-                else {
-                    auto testVal = EvalSExp(false, firstElem);
-                    if (auto atomTest = dynamic_pointer_cast<AtomNode>(testVal))
-                        testMatches = (atomTest->getValue() != "nil");
-                    else
-                        testMatches = true;
-                }
-
-                if (testMatches) {
-                    if (clauseElems.size() == 1)
-                        throw RunTimeException("ERROR (no return value) : " + Printer::print(node));
-                    shared_ptr<Node> res;
-                    for (size_t j = 1; j < clauseElems.size(); j++)
-                        res = EvalSExp(false, clauseElems[j]);
-                    return res;
-                }
-            }
-            throw RunTimeException("ERROR (no return value) : " + Printer::print(node));
-        }
+//        else if (op == "if") {
+//            if (elems.size() != 3 && elems.size() != 4)
+//                throw RunTimeException("ERROR (incorrect number of arguments) : " + op);
+//            auto condVal = EvalSExp(false, elems[1]);
+//            bool condTrue;
+//            if (auto atomCond = dynamic_pointer_cast<AtomNode>(condVal))
+//                condTrue = (atomCond->getValue() != "nil");
+//            else
+//                condTrue = true;
+//            if (condTrue)
+//                return EvalSExp(false, elems[2]);
+//            else {
+//                if (elems.size() == 4)
+//                    return EvalSExp(false, elems[3]);
+//                else
+//                    throw RunTimeException("ERROR (no return value) : " + Printer::print(node));
+//            }
+//        }
+//        else if (op == "cond") {
+//            for (size_t i = 1; i < elems.size(); i++) {
+//                vector<shared_ptr<Node>> clauseElems = unrollList(elems[i]);
+//                if (clauseElems.empty())
+//                    throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
+//
+//                bool testMatches = false;
+//                bool isLastClause = (i == elems.size() - 1);
+//                auto firstElem = clauseElems[0];
+//
+//                // If this is the last clause and its test is literally the symbol "else",
+//                // then match unconditionally.
+//                if (isLastClause &&
+//                    dynamic_pointer_cast<AtomNode>(firstElem) &&
+//                    dynamic_pointer_cast<AtomNode>(firstElem)->getValue() == "else") {
+//                    testMatches = true;
+//                }
+//                else {
+//                    auto testVal = EvalSExp(false, firstElem);
+//                    if (auto atomTest = dynamic_pointer_cast<AtomNode>(testVal))
+//                        testMatches = (atomTest->getValue() != "nil");
+//                    else
+//                        testMatches = true;
+//                }
+//
+//                if (testMatches) {
+//                    if (clauseElems.size() == 1)
+//                        throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
+//                    shared_ptr<Node> res;
+//                    for (size_t j = 1; j < clauseElems.size(); j++)
+//                        res = EvalSExp(false, clauseElems[j]);
+//                    return res;
+//                }
+//            }
+//            throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
+//        }
 
         else if (op == "begin") {
             if (elems.size() < 2)
@@ -1041,6 +1021,9 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                 args.push_back(EvalSExp(false, elems[i]));
 
             double prev = getNumber(op, args[0]);
+            for (size_t i = 1; i < args.size(); i++)
+                double curr = getNumber(op, args[i]);
+
             for (size_t i = 1; i < args.size(); i++) {
                 double curr = getNumber(op, args[i]);
                 if (!(prev > curr))
@@ -1059,6 +1042,9 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                 args.push_back(EvalSExp(false, elems[i]));
 
             double prev = getNumber(op, args[0]);
+            for (size_t i = 1; i < args.size(); i++)
+                double curr = getNumber(op, args[i]);
+
             for (size_t i = 1; i < args.size(); i++) {
                 double curr = getNumber(op, args[i]);
                 if (!(prev >= curr))
@@ -1077,6 +1063,9 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                 args.push_back(EvalSExp(false, elems[i]));
 
             double prev = getNumber(op, args[0]);
+            for (size_t i = 1; i < args.size(); i++)
+                double curr = getNumber(op, args[i]);
+
             for (size_t i = 1; i < args.size(); i++) {
                 double curr = getNumber(op, args[i]);
                 if (!(prev < curr))
@@ -1095,6 +1084,9 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                 args.push_back(EvalSExp(false, elems[i]));
 
             double prev = getNumber(op, args[0]);
+            for (size_t i = 1; i < args.size(); i++)
+                double curr = getNumber(op, args[i]);
+
             for (size_t i = 1; i < args.size(); i++) {
                 double curr = getNumber(op, args[i]);
                 if (!(prev <= curr))
@@ -1113,6 +1105,9 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                 args.push_back(EvalSExp(false, elems[i]));
 
             double first = getNumber(op, args[0]);
+            for (size_t i = 1; i < args.size(); i++)
+                double curr = getNumber(op, args[i]);
+
             for (size_t i = 1; i < args.size(); i++) {
                 double curr = getNumber(op, args[i]);
                 if (first != curr)
