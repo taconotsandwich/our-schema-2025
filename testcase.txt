@@ -146,3 +146,165 @@ hello
 (cdr a)
 
 (exit 0)
+
+; =============== Problem 9 可見數據 ====================
+ab
+(define a "=============== Problem 9 viewable case =================")
+a
+
+(clean-environment)
+
+a
+
+; 5. Primitive predicates (A predicate is a function that returns
+;      #t or nil (i.e., #f); By convention, the name of a predicate
+;      should have a suffix '?')
+
+(pair? 3)      ; Other Lisps may not have PAIR?; they have ATOM? and LIST?
+(pair? '(3 4))
+(pair? '(3 . 4))
+(pair? "Hello, there!")
+(pair? "Hello, " "How are you?")
+(pair?)
+(null? ())     ; is it the empty list?
+(null? #f)     ; #f = nil = ()
+(null? '(3 . 4))
+(integer? 3)
+(integer? 3.4)
+(integer? -.4)
+(real? +3)
+(real? 3.4)
+(real? .5)
+(number? 3)
+(number? 3.4)
+(string? "Hi")
+(string? +3.4)
+(boolean? #t)
+(boolean? ())
+(boolean? #f)
+(boolean? '(3 . 4))
+(symbol? 'abc)
+(symbol? 3)
+(number? America)
+(define America '(U. S. A.))
+(symbol? America    ; Once the symbol America is evaluated,
+  )                   ; do we get a symbol?
+(pair? America)
+(pair? American)
+(boolean? America)
+(pair? Europe 4)
+(define Europe 'hi)
+(pair? America Europe)
+
+; 6. Basic arithmetic, logical and string operations
+
+(+ 3 7 10)
+(- 3 7 10)
+(- 3.5 5 10)
+(* 3 4)
+(* 3 "Hi")
+(* 3 4.5 5)
+(* '(1 (2 3) 4) '(6 7 8))
+(*)
+(* 3)
+(* 3 4 5)
+(* 1 2 3 4 5)
+(/ 3)
+(- 3)
+(+ 3)
+(- 1 2 3 4 5)
+(define a 5)
+(/ 15 a)
+(/ 7 a)
+(/ 15.0 3)
+(/ 15 2)
+(/ 15.0 2)
+(/ 15 0)
+(/ 15 2.0)
+(/ 45 3 5 2)
+(+ 15.125 4)
+(+ (* a 10) (pair? (+ a a)))
+(not #t)
+(not)
+(not What about?)
+(not 3)
+(not '(1 2))
+(not ())
+(not nil)
+(not (pair? (+ a a)))
+(> 3 2 1.2)
+(> 5 3 1)
+(> 5 3 5 nil)
+(> 3.125 2)
+(>= 3.25 2)
+(< 3.125 2)
+(<= 3.125 2)
+(<= 2 2 2 2 2 2 2 2)
+(= 2 2)
+(= 2 a)
+(> a a)
+(> a 'a)
+(= 2 a a)
+(>= a a a 'a)
+(string-append "\"Hello," " there!\"")
+(string-append "Hello," " there!" " Wait!")
+(string-append "Hello,"")
+(string-append "Hello,")
+(string-append)
+(string>? "az" "aw")
+(string>? "az" "aw" "ax")
+(string>? "az" "aw" "atuv")
+(string>? "az")
+(string>?)
+(string>? 15 "hi")
+(string<? "az" "aw")
+(string<? "az" "aw" "ax")
+(string<? "az" "aw" (+ 2 (/ 5 3)) "ax")
+(string<? "az" "aw" (+ 2 (/ 5 0)) "ax")
+(string<? "az" "aw" "atuv")
+(string=? "az" "aw")
+(string=? "az" "aw" "ax")
+(string=? "az" (string-append "a" "z"))
+(string=? "az" (string-append "a" "z" 3) (/ (+ 3 5) (- 12 (+ 5 7))))
+(string=? "az" (string-append "a" "z" "3") (/ (+ 3 5) (- 12 (+ 5 7))))
+(+ 15 (begin "hi" 5))
+(+ 15 (begin 4 5 "hi"))
+(string>? "hi" "there" a)
+(string>? "hi" "there" about)
+
+; 8. eqv? and equal?
+
+; eqv? returns "true" only when the two being compared
+; objects are atoms (except in the case of strings)
+; or when the two being compared objects "occupy the
+; same memory space".
+
+; equal?, on the other hand, is the usual notion of
+; equality comparison
+
+(eqv?)
+(eqv? 3)
+(eqv? 3 3)
+(eqv? 3 3 3)
+(define a '((3 (4 5))))
+a
+(eqv? a a)
+(eqv? a '((3 (4 5))))
+(equal? a '((3 (4 5))))
+(define b a)
+(eqv? a b)
+(define c '(3 4))
+(eqv? a c)
+(equal? a c)
+(eqv? '((3 (4 5))) '((3 (4 5))))
+(eqv? "Hi" "Hi")
+(equal? a a)
+(equal? '((3 (4 5))) '((3 (4 5))))
+(equal? '((3 (4 5))) '(3 4 5))
+(equal? "Hi" "Hi")
+
+(define c (cdr a))(eqv? c (cdr b))(define c (cons (car a) (cdr b)))
+(eqv? c b)(equal? c b). 5
+(+ 10 20)(  . 5 )   (
+
+    exit)

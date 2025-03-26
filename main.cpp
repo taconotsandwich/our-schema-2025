@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <cctype>
-#include <cmath>
 #include <exception>
 #include <iomanip>
 #include <iostream>
@@ -26,14 +25,24 @@ public:
 class EOFException : public std::exception {
 public:
     [[nodiscard]] const char* what() const noexcept override {
-        return "ERROR (no more input) : END-OF-FILE encountered";
+        return "EOF encountered";
     }
 };
 
-class RuntimeException : public std::exception {
+class CompileTimeException : public std::exception {
     string message;
 public:
-    explicit RuntimeException(string s) : message(std::move(s)) { };
+    explicit CompileTimeException(string s) : message(std::move(s)) { };
+
+    [[nodiscard]] const char* what() const noexcept override {
+        return message.c_str();
+    }
+};
+
+class RunTimeException : public std::exception {
+    string message;
+public:
+    explicit RunTimeException(string s) : message(std::move(s)) { };
 
     [[nodiscard]] const char* what() const noexcept override {
         return message.c_str();
@@ -287,7 +296,7 @@ private:
                 }
             } else {
                 if (peek() == '\n') {
-                    throw RuntimeException(
+                    throw CompileTimeException(
                             "ERROR (no closing quote) : END-OF-LINE encountered at Line " +
                             to_string(line) + " Column " + to_string(column + 1)
                     );
@@ -456,7 +465,7 @@ private:
             case TokenType::T:
                 return make_shared<AtomNode>(token.type, token.value);
             default:
-                throw RuntimeException(
+                throw CompileTimeException(
                         "ERROR (unexpected token) : atom or '(' expected when token at Line " +
                         to_string(token.line) + " Column " + to_string(token.column) +
                         " is >>" + token.value + "<<"
@@ -501,7 +510,7 @@ private:
             // Ensure closing parenthesis
             if (scanner.peekToken().type != TokenType::RIGHT_PAREN) {
                 Token token = scanner.scanToken();
-                throw RuntimeException(
+                throw CompileTimeException(
                         "ERROR (unexpected token) : ')' expected when token at Line " +
                         to_string(token.line) + " Column " + to_string(token.column) +
                         " is >>" + token.value + "<<"
@@ -522,7 +531,7 @@ private:
         else {
             if (scanner.peekToken().type != TokenType::RIGHT_PAREN) {
                 Token token = scanner.scanToken();
-                throw RuntimeException(
+                throw CompileTimeException(
                         "ERROR (unexpected token) : ')' expected when token at Line " +
                         to_string(token.line) + " Column " + to_string(token.column) +
                         " is >>" + token.value + "<<" );
@@ -626,17 +635,17 @@ vector<shared_ptr<Node>> unrollList(const shared_ptr<Node>& list) {
             if (atom && atom->getValue() == "nil")
                 break;
             else
-                throw RuntimeException("ERROR (non-list) : " + Printer::print(list));
+                throw CompileTimeException("ERROR (non-list) : " + Printer::print(list));
         }
     }
     return elems;
 }
 
 // Extract a number from an evaluated node.
-double getNumber(const shared_ptr<Node>& node) {
+double getNumber(const string& op, const shared_ptr<Node>& node) {
     auto atom = dynamic_pointer_cast<AtomNode>(node);
     if (!atom || (atom->getType() != TokenType::INT && atom->getType() != TokenType::FLOAT))
-        throw RuntimeException("ERROR (incorrect argument type) : " + node->toString());
+        throw CompileTimeException("ERROR (" + op + " with incorrect argument type) : " + Printer::print(node));
     return stod(atom->getValue());
 }
 
@@ -690,25 +699,6 @@ bool structuralEqual(const shared_ptr<Node>& n1, const shared_ptr<Node>& n2) {
     return false;
 }
 
-// Helper function to check whether the S-expression is exactly (exit)
-bool isExitExpression(const shared_ptr<Node>& node) {
-    // We assume (exit) is represented as a proper list with one element "exit"
-    auto dot = dynamic_pointer_cast<DotNode>(node);
-
-    if (!dot)
-        return false;
-
-    auto left = dot->getLeft();
-    auto right = dot->getRight();
-    auto atomLeft = dynamic_pointer_cast<AtomNode>(left);
-    auto atomRight = dynamic_pointer_cast<AtomNode>(right);
-
-    if (!atomLeft || !atomRight)
-        return false;
-
-    return (atomLeft->getValue() == "exit" && atomRight->getValue() == "nil");
-}
-
 shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
     // For quoted expressions using the shorthand: return the inner expression unchanged.
     if (auto quote = dynamic_pointer_cast<QuoteNode>(node))
@@ -728,33 +718,45 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                 return make_shared<AtomNode>(TokenType::SYMBOL, "#<procedure " + sym + ">");
 
             else
-                throw RuntimeException("ERROR (unbound symbol) : " + node->toString());
+                throw RunTimeException("ERROR (unbound symbol) : " + node->toString());
         }
         return node;
     }
 
     // For list expressions (function applications).
     if (dynamic_pointer_cast<DotNode>(node)) {
+        // Unroll the list
         vector<shared_ptr<Node>> elems = unrollList(node);
 
         if (elems.empty())
-            throw RuntimeException("ERROR (attempt to apply non-function) : " + node->toString());
+            throw RunTimeException("ERROR (attempt to apply non-function) : " + node->toString());
 
-        // Evaluate the operator.
-        auto opNode = elems[0];
+        // Evaluate the operator
+        const auto& opNode = elems[0];
         string op;
-        if (auto atomOp = dynamic_pointer_cast<AtomNode>(opNode))
+
+        if (auto atomOp = dynamic_pointer_cast<AtomNode>(opNode)) {
+            if (atomOp->getType() != TokenType::SYMBOL)
+                throw RunTimeException("ERROR (attempt to apply non-function) : " + atomOp->getValue());
             op = atomOp->getValue();
+        }
 
         else
             op = dynamic_pointer_cast<AtomNode>(EvalSExp(false, opNode))->getValue();
 
-        // If symbol is not defined in environment, throw error
-        if (globalEnv.find(op) == globalEnv.end() && builtins.find(op) == builtins.end())
-            throw RuntimeException("ERROR (attempt to apply non-function) : " + op);
-
+        // Look up for operator in the environment
         while (globalEnv.find(op) != globalEnv.end() && builtins.find(op) == builtins.end())
             op = globalEnv[op]->toString();
+
+        if (op.find("#<procedure ") != string::npos) {
+            const string prefix = "#<procedure ";
+            const string suffix = ">";
+            op = op.substr(prefix.size(), op.size() - prefix.size() - suffix.size());
+        }
+
+        // If symbol is not defined in environment, throw error
+        if (globalEnv.find(op) == globalEnv.end() && builtins.find(op) == builtins.end())
+            throw RunTimeException("ERROR (unbound symbol) : " + op);
 
         if (op.find("#<procedure ") != string::npos) {
             const string prefix = "#<procedure ";
@@ -765,30 +767,45 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
         // --- Special Forms ---
         if (op == "define") {
             if (!isGlobalLayer)
-                throw RuntimeException("ERROR (level of DEFINE)");
+                throw RunTimeException("ERROR (level of DEFINE)");
 
             if (elems.size() != 3)
-                throw RuntimeException("ERROR (DEFINE format) : " + Printer::print(node));
+                throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
 
             auto symNode = elems[1];
 
             if (auto atomSym = dynamic_pointer_cast<AtomNode>(symNode)) {
                 if (atomSym->getType() != TokenType::SYMBOL)
-                    throw RuntimeException("ERROR (DEFINE format) : " + Printer::print(node));
+                    throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
                 string symName = atomSym->getValue();
                 if (builtins.find(symName) != builtins.end())
-                    throw RuntimeException("ERROR (DEFINE format) : " + Printer::print(node));
+                    throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
                 globalEnv[symName] = EvalSExp(false, elems[2]);
                 return make_shared<AtomNode>(TokenType::SYMBOL, symName + " defined");
             }
 
             else
-                throw RuntimeException("ERROR (DEFINE format) : " + Printer::print(node));
+                throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
+        }
+        else if (op == "clean-environment") {
+            if (!isGlobalLayer)
+                throw RunTimeException("ERROR (level of CLEAN-ENVIRONMENT)");
+            if (elems.size() != 1)
+                throw RunTimeException("ERROR (incorrect number of arguments) : clean-environment");
+            globalEnv.clear();
+            return make_shared<AtomNode>(TokenType::SYMBOL, "environment cleaned");
+        }
+        else if (op == "exit") {
+            if (!isGlobalLayer)
+                throw RunTimeException("ERROR (level of EXIT)");
+            if (elems.size() != 1)
+                throw RunTimeException("ERROR (incorrect number of arguments) : exit");
+            throw ExitException();
         }
 
         else if (op == "if") {
             if (elems.size() != 3 && elems.size() != 4)
-                throw RuntimeException("ERROR (if format) : ( if ... )");
+                throw RunTimeException("ERROR (incorrect number of arguments) : " + op);
             auto condVal = EvalSExp(false, elems[1]);
             bool condTrue;
             if (auto atomCond = dynamic_pointer_cast<AtomNode>(condVal))
@@ -801,14 +818,14 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                 if (elems.size() == 4)
                     return EvalSExp(false, elems[3]);
                 else
-                    throw RuntimeException("ERROR (no return value) : ( if nil " + elems[2]->toString() + ")");
+                    throw RunTimeException("ERROR (no return value) : ( if nil " + elems[2]->toString() + ")");
             }
         }
         else if (op == "cond") {
             for (size_t i = 1; i < elems.size(); i++) {
                 vector<shared_ptr<Node>> clauseElems = unrollList(elems[i]);
                 if (clauseElems.empty())
-                    throw RuntimeException("ERROR (COND format) : ( cond ... )");
+                    throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
 
                 bool testMatches = false;
                 bool isLastClause = (i == elems.size() - 1);
@@ -820,7 +837,8 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                     dynamic_pointer_cast<AtomNode>(firstElem) &&
                     dynamic_pointer_cast<AtomNode>(firstElem)->getValue() == "else") {
                     testMatches = true;
-                } else {
+                }
+                else {
                     auto testVal = EvalSExp(false, firstElem);
                     if (auto atomTest = dynamic_pointer_cast<AtomNode>(testVal))
                         testMatches = (atomTest->getValue() != "nil");
@@ -830,44 +848,282 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
                 if (testMatches) {
                     if (clauseElems.size() == 1)
-                        throw RuntimeException("ERROR (no return value) : ( cond ... )");
+                        throw RunTimeException("ERROR (no return value) : " + Printer::print(node));
                     shared_ptr<Node> res;
                     for (size_t j = 1; j < clauseElems.size(); j++)
                         res = EvalSExp(false, clauseElems[j]);
                     return res;
                 }
             }
-            throw RuntimeException("ERROR (no return value) : ( cond ... )");
+            throw RunTimeException("ERROR (no return value) : " + Printer::print(node));
         }
+
         else if (op == "begin") {
             if (elems.size() < 2)
-                throw RuntimeException("ERROR (begin format) : ( begin ... )");
+                throw RunTimeException("ERROR (incorrect number of arguments) : begin");
             shared_ptr<Node> res;
             for (size_t i = 1; i < elems.size(); i++)
                 res = EvalSExp(false, elems[i]);
             return res;
         }
-        else if (op == "clean-environment") {
-            if (!isGlobalLayer)
-                throw RuntimeException("ERROR (level of CLEAN-ENVIRONMENT)");
-            if (elems.size() != 1)
-                throw RuntimeException("ERROR (incorrect number of arguments) : clean-environment");
-            globalEnv.clear();
-            return make_shared<AtomNode>(TokenType::SYMBOL, "environment cleaned");
-        }
-        else if (op == "exit") {
-            if (elems.size() != 1)
-                throw RuntimeException("ERROR (incorrect number of arguments) : exit");
-            throw ExitException();
-        }
         else if (op == "quote") {
             if (elems.size() != 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : quote");
+                throw RunTimeException("ERROR (incorrect number of arguments) : quote");
             return elems[1];
         }
+        else if (op == "cons") {
+            if (elems.size() != 3)
+                throw RunTimeException("ERROR (incorrect number of arguments) : cons");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            return make_shared<DotNode>(args[0], args[1]);
+        }
+        else if (op == "car") {
+            if (elems.size() != 2)
+                throw RunTimeException("ERROR (incorrect number of arguments) : car");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            auto pairNode = dynamic_pointer_cast<DotNode>(args[0]);
+            if (!pairNode)
+                throw RunTimeException("ERROR (car with incorrect argument type) : " + args[0]->toString());
+            return pairNode->getLeft();
+        }
+        else if (op == "cdr") {
+            if (elems.size() != 2)
+                throw RunTimeException("ERROR (incorrect number of arguments) : cdr");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            auto pairNode = dynamic_pointer_cast<DotNode>(args[0]);
+            if (!pairNode)
+                throw RunTimeException("ERROR (cdr with incorrect argument type) : " + args[0]->toString());
+            return pairNode->getRight();
+        }
+        else if (op == "list") {
+            shared_ptr<Node> list = make_shared<AtomNode>(TokenType::NIL, "nil");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            for (int i = args.size() - 1; i >= 0; i--)
+                list = make_shared<DotNode>(args[i], list);
+
+            return list;
+        }
+
+        else if (op == "+") {
+            if (elems.size() < 3)
+                throw RunTimeException("ERROR (incorrect number of arguments) : +");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            double sum = 0.0;
+            bool forceFloat = false;
+            for (auto arg : args) {
+                double n = getNumber(op, arg);
+                sum += n;
+                if (auto atom = dynamic_pointer_cast<AtomNode>(arg))
+                    if (atom->getType() == TokenType::FLOAT)
+                        forceFloat = true;
+            }
+
+            if (forceFloat)
+                return make_shared<AtomNode>(TokenType::FLOAT, to_string(sum));
+            else
+                return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(sum)));
+        }
+        else if (op == "-") {
+            if (elems.size() < 3)
+                throw RunTimeException("ERROR (incorrect number of arguments) : -");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            double result = getNumber(op, args[0]);
+            bool forceFloat = false;
+            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
+                if (atom->getType() == TokenType::FLOAT)
+                    forceFloat = true;
+
+            for (size_t i = 1; i < args.size(); i++) {
+                double n = getNumber(op, args[i]);
+                result -= n;
+                if (auto atom = dynamic_pointer_cast<AtomNode>(args[i]))
+                    if (atom->getType() == TokenType::FLOAT)
+                        forceFloat = true;
+            }
+
+            if (forceFloat)
+                return make_shared<AtomNode>(TokenType::FLOAT, to_string(result));
+            else
+                return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(result)));
+        }
+        else if (op == "*") {
+            if (elems.size() < 3)
+                throw RunTimeException("ERROR (incorrect number of arguments) : *");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            double product = 1.0;
+            bool forceFloat = false;
+            for (auto arg : args) {
+                double n = getNumber(op, arg);
+                product *= n;
+                if (auto atom = dynamic_pointer_cast<AtomNode>(arg))
+                    if (atom->getType() == TokenType::FLOAT)
+                        forceFloat = true;
+            }
+
+            if (forceFloat)
+                return make_shared<AtomNode>(TokenType::FLOAT, to_string(product));
+            else
+                return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(product)));
+        }
+        else if (op == "/") {
+            if (elems.size() < 3)
+                throw RunTimeException("ERROR (incorrect number of arguments) : /");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            double result = getNumber(op, args[0]);
+            bool forceFloat = false;
+            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
+                if (atom->getType() == TokenType::FLOAT)
+                    forceFloat = true;
+
+            for (size_t i = 1; i < args.size(); i++) {
+                double divisor = getNumber(op, args[i]);
+                if (divisor == 0)
+                    throw RunTimeException("ERROR (division by zero) : /");
+                result /= divisor;
+                if (auto atom = dynamic_pointer_cast<AtomNode>(args[i]))
+                    if (atom->getType() == TokenType::FLOAT)
+                        forceFloat = true;
+            }
+
+            if (forceFloat)
+                return make_shared<AtomNode>(TokenType::FLOAT, to_string(result));
+            else
+                return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(result)));
+        }
+
+        else if (op == ">") {
+            if (elems.size() < 3)
+                throw RunTimeException("ERROR (incorrect number of arguments) : >");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            double prev = getNumber(op, args[0]);
+            for (size_t i = 1; i < args.size(); i++) {
+                double curr = getNumber(op, args[i]);
+                if (!(prev > curr))
+                    return make_shared<AtomNode>(TokenType::NIL, "nil");
+                prev = curr;
+            }
+            return make_shared<AtomNode>(TokenType::T, "#t");
+        }
+        else if (op == ">=") {
+            if (elems.size() < 3)
+                throw RunTimeException("ERROR (incorrect number of arguments) : >=");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            double prev = getNumber(op, args[0]);
+            for (size_t i = 1; i < args.size(); i++) {
+                double curr = getNumber(op, args[i]);
+                if (!(prev >= curr))
+                    return make_shared<AtomNode>(TokenType::NIL, "nil");
+                prev = curr;
+            }
+            return make_shared<AtomNode>(TokenType::T, "#t");
+        }
+        else if (op == "<") {
+            if (elems.size() < 3)
+                throw RunTimeException("ERROR (incorrect number of arguments) : <");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            double prev = getNumber(op, args[0]);
+            for (size_t i = 1; i < args.size(); i++) {
+                double curr = getNumber(op, args[i]);
+                if (!(prev < curr))
+                    return make_shared<AtomNode>(TokenType::NIL, "nil");
+                prev = curr;
+            }
+            return make_shared<AtomNode>(TokenType::T, "#t");
+        }
+        else if (op == "<=") {
+            if (elems.size() < 3)
+                throw RunTimeException("ERROR (incorrect number of arguments) : <=");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            double prev = getNumber(op, args[0]);
+            for (size_t i = 1; i < args.size(); i++) {
+                double curr = getNumber(op, args[i]);
+                if (!(prev <= curr))
+                    return make_shared<AtomNode>(TokenType::NIL, "nil");
+                prev = curr;
+            }
+            return make_shared<AtomNode>(TokenType::T, "#t");
+        }
+        else if (op == "=") {
+            if (elems.size() < 3)
+                throw RunTimeException("ERROR (incorrect number of arguments) : =");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            double first = getNumber(op, args[0]);
+            for (size_t i = 1; i < args.size(); i++) {
+                double curr = getNumber(op, args[i]);
+                if (first != curr)
+                    return make_shared<AtomNode>(TokenType::NIL, "nil");
+            }
+            return make_shared<AtomNode>(TokenType::T, "#t");
+        }
+
         else if (op == "not") {
             if (elems.size() != 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : not");
+                throw RunTimeException("ERROR (incorrect number of arguments) : not");
             auto testVal = EvalSExp(false, elems[1]);
             bool truth;
             if (auto atom = dynamic_pointer_cast<AtomNode>(testVal))
@@ -879,7 +1135,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
         }
         else if (op == "and") {
             if (elems.size() < 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : and");
+                throw RunTimeException("ERROR (incorrect number of arguments) : and");
             shared_ptr<Node> lastEvaluated;
             for (size_t i = 1; i < elems.size(); i++) {
                 lastEvaluated = EvalSExp(false, elems[i]);
@@ -895,7 +1151,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
         }
         else if (op == "or") {
             if (elems.size() < 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : or");
+                throw RunTimeException("ERROR (incorrect number of arguments) : or");
             for (size_t i = 1; i < elems.size(); i++) {
                 auto val = EvalSExp(false, elems[i]);
                 bool truth;
@@ -909,417 +1165,9 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             return make_shared<AtomNode>(TokenType::NIL, "nil");
         }
 
-        // --- Arithmetic Operations ---
-        if (op == "+") {
-            if (elems.size() < 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : +");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            double sum = 0.0;
-            bool forceFloat = false;
-            for (auto arg : args) {
-                double n = getNumber(arg);
-                sum += n;
-                if (auto atom = dynamic_pointer_cast<AtomNode>(arg))
-                    if (atom->getType() == TokenType::FLOAT)
-                        forceFloat = true;
-            }
-
-            if (forceFloat)
-                return make_shared<AtomNode>(TokenType::FLOAT, to_string(sum));
-            else
-                return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(sum)));
-        }
-        else if (op == "-") {
-            if (elems.size() < 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : -");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            double result = getNumber(args[0]);
-            bool forceFloat = false;
-            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
-                if (atom->getType() == TokenType::FLOAT)
-                    forceFloat = true;
-
-            for (size_t i = 1; i < args.size(); i++) {
-                double n = getNumber(args[i]);
-                result -= n;
-                if (auto atom = dynamic_pointer_cast<AtomNode>(args[i]))
-                    if (atom->getType() == TokenType::FLOAT)
-                        forceFloat = true;
-            }
-
-            if (forceFloat)
-                return make_shared<AtomNode>(TokenType::FLOAT, to_string(result));
-            else
-                return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(result)));
-        }
-        else if (op == "*") {
-            if (elems.size() < 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : *");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            double product = 1.0;
-            bool forceFloat = false;
-            for (auto arg : args) {
-                double n = getNumber(arg);
-                product *= n;
-                if (auto atom = dynamic_pointer_cast<AtomNode>(arg))
-                    if (atom->getType() == TokenType::FLOAT)
-                        forceFloat = true;
-            }
-
-            if (forceFloat)
-                return make_shared<AtomNode>(TokenType::FLOAT, to_string(product));
-            else
-                return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(product)));
-        }
-        else if (op == "/") {
-            if (elems.size() < 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : /");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            double result = getNumber(args[0]);
-            bool forceFloat = false;
-            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
-                if (atom->getType() == TokenType::FLOAT)
-                    forceFloat = true;
-
-            for (size_t i = 1; i < args.size(); i++) {
-                double divisor = getNumber(args[i]);
-                if (divisor == 0)
-                    throw RuntimeException("ERROR (division by zero) : /");
-                result /= divisor;
-                if (auto atom = dynamic_pointer_cast<AtomNode>(args[i]))
-                    if (atom->getType() == TokenType::FLOAT)
-                        forceFloat = true;
-            }
-
-            if (forceFloat)
-                return make_shared<AtomNode>(TokenType::FLOAT, to_string(result));
-            else
-                return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(result)));
-        }
-
-        else if (op == "cons") {
-            if (elems.size() != 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : cons");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            return make_shared<DotNode>(args[0], args[1]);
-        }
-        else if (op == "car") {
-            if (elems.size() != 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : car");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            auto pairNode = dynamic_pointer_cast<DotNode>(args[0]);
-            if (!pairNode)
-                throw RuntimeException("ERROR (car with incorrect argument type) : " + args[0]->toString());
-            return pairNode->getLeft();
-        }
-        else if (op == "cdr") {
-            if (elems.size() != 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : cdr");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            auto pairNode = dynamic_pointer_cast<DotNode>(args[0]);
-            if (!pairNode)
-                throw RuntimeException("ERROR (cdr with incorrect argument type) : " + args[0]->toString());
-            return pairNode->getRight();
-        }
-        else if (op == "list") {
-            shared_ptr<Node> list = make_shared<AtomNode>(TokenType::NIL, "nil");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            for (int i = args.size() - 1; i >= 0; i--)
-                list = make_shared<DotNode>(args[i], list);
-            return list;
-        }
-
-        else if (op == "atom?") {
-            if (elems.size() != 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : atom?");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            return dynamic_pointer_cast<DotNode>(args[0])
-                   ? make_shared<AtomNode>(TokenType::NIL, "nil")
-                   : make_shared<AtomNode>(TokenType::T, "#t");
-        }
-        else if (op == "pair?") {
-            if (elems.size() != 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : pair?");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            return dynamic_pointer_cast<DotNode>(args[0])
-                   ? make_shared<AtomNode>(TokenType::T, "#t")
-                   : make_shared<AtomNode>(TokenType::NIL, "nil");
-        }
-        else if (op == "list?") {
-            if (elems.size() != 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : list?");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            bool proper = false;
-            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
-                proper = (atom->getValue() == "nil");
-            else
-                proper = isProperList(args[0]);
-            return proper ? make_shared<AtomNode>(TokenType::T, "#t")
-                          : make_shared<AtomNode>(TokenType::NIL, "nil");
-        }
-        else if (op == "null?") {
-            if (elems.size() != 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : null?");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
-                return (atom->getValue() == "nil")
-                       ? make_shared<AtomNode>(TokenType::T, "#t")
-                       : make_shared<AtomNode>(TokenType::NIL, "nil");
-            else
-                return make_shared<AtomNode>(TokenType::NIL, "nil");
-        }
-        else if (op == "integer?") {
-            if (elems.size() != 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : integer?");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
-                return (atom->getType() == TokenType::INT)
-                       ? make_shared<AtomNode>(TokenType::T, "#t")
-                       : make_shared<AtomNode>(TokenType::NIL, "nil");
-            else
-                return make_shared<AtomNode>(TokenType::NIL, "nil");
-        }
-        else if (op == "real?") {
-            if (elems.size() != 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : real?");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
-                return ((atom->getType() == TokenType::INT || atom->getType() == TokenType::FLOAT)
-                        ? make_shared<AtomNode>(TokenType::T, "#t")
-                        : make_shared<AtomNode>(TokenType::NIL, "nil"));
-            else
-                return make_shared<AtomNode>(TokenType::NIL, "nil");
-        }
-        else if (op == "number?") {
-            if (elems.size() != 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : number?");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
-                return ((atom->getType() == TokenType::INT || atom->getType() == TokenType::FLOAT)
-                        ? make_shared<AtomNode>(TokenType::T, "#t")
-                        : make_shared<AtomNode>(TokenType::NIL, "nil"));
-            else
-                return make_shared<AtomNode>(TokenType::NIL, "nil");
-        }
-        else if (op == "string?") {
-            if (elems.size() != 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : string?");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
-                return (atom->getType() == TokenType::STRING
-                        ? make_shared<AtomNode>(TokenType::T, "#t")
-                        : make_shared<AtomNode>(TokenType::NIL, "nil"));
-            else
-                return make_shared<AtomNode>(TokenType::NIL, "nil");
-        }
-        else if (op == "boolean?") {
-            if (elems.size() != 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : boolean?");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0])) {
-                if (atom->getType() == TokenType::T || atom->getType() == TokenType::NIL)
-                    return make_shared<AtomNode>(TokenType::T, "#t");
-                else
-                    return make_shared<AtomNode>(TokenType::NIL, "nil");
-            }
-            else
-                return make_shared<AtomNode>(TokenType::NIL, "nil");
-        }
-        else if (op == "symbol?") {
-            if (elems.size() != 2)
-                throw RuntimeException("ERROR (incorrect number of arguments) : symbol?");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
-                return (atom->getType() == TokenType::SYMBOL
-                        ? make_shared<AtomNode>(TokenType::T, "#t")
-                        : make_shared<AtomNode>(TokenType::NIL, "nil"));
-            else
-                return make_shared<AtomNode>(TokenType::NIL, "nil");
-        }
-
-        else if (op == ">") {
-            if (elems.size() < 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : >");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            double prev = getNumber(args[0]);
-            for (size_t i = 1; i < args.size(); i++) {
-                double curr = getNumber(args[i]);
-                if (!(prev > curr))
-                    return make_shared<AtomNode>(TokenType::NIL, "nil");
-                prev = curr;
-            }
-            return make_shared<AtomNode>(TokenType::T, "#t");
-        }
-        else if (op == ">=") {
-            if (elems.size() < 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : >=");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            double prev = getNumber(args[0]);
-            for (size_t i = 1; i < args.size(); i++) {
-                double curr = getNumber(args[i]);
-                if (!(prev >= curr))
-                    return make_shared<AtomNode>(TokenType::NIL, "nil");
-                prev = curr;
-            }
-            return make_shared<AtomNode>(TokenType::T, "#t");
-        }
-        else if (op == "<") {
-            if (elems.size() < 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : <");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            double prev = getNumber(args[0]);
-            for (size_t i = 1; i < args.size(); i++) {
-                double curr = getNumber(args[i]);
-                if (!(prev < curr))
-                    return make_shared<AtomNode>(TokenType::NIL, "nil");
-                prev = curr;
-            }
-            return make_shared<AtomNode>(TokenType::T, "#t");
-        }
-        else if (op == "<=") {
-            if (elems.size() < 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : <=");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            double prev = getNumber(args[0]);
-            for (size_t i = 1; i < args.size(); i++) {
-                double curr = getNumber(args[i]);
-                if (!(prev <= curr))
-                    return make_shared<AtomNode>(TokenType::NIL, "nil");
-                prev = curr;
-            }
-            return make_shared<AtomNode>(TokenType::T, "#t");
-        }
-        else if (op == "=") {
-            if (elems.size() < 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : =");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            double first = getNumber(args[0]);
-            for (size_t i = 1; i < args.size(); i++) {
-                double curr = getNumber(args[i]);
-                if (first != curr)
-                    return make_shared<AtomNode>(TokenType::NIL, "nil");
-            }
-            return make_shared<AtomNode>(TokenType::T, "#t");
-        }
-
         else if (op == "string-append") {
             if (elems.size() < 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : string-append");
+                throw RunTimeException("ERROR (incorrect number of arguments) : string-append");
 
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
@@ -1330,13 +1178,13 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             for (auto & arg : args) {
                 if (auto atom = dynamic_pointer_cast<AtomNode>(arg)) {
                     if (atom->getType() != TokenType::STRING)
-                        throw RuntimeException("ERROR (string-append with incorrect argument type) : " + atom->toString());
+                        throw RunTimeException("ERROR (string-append with incorrect argument type) : " + atom->toString());
                     string str = atom->getValue();
                     if (str.length() >= 2 && str.front() == '"' && str.back() == '"')
                         str = str.substr(1, str.length() - 2);
                     result += str;
                 } else {
-                    throw RuntimeException("ERROR (string-append with incorrect argument type)");
+                    throw RunTimeException("ERROR (string-append with incorrect argument type)");
                 }
             }
             string finalStr = "\"" + result + "\"";
@@ -1344,7 +1192,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
         }
         else if (op == "string>?") {
             if (elems.size() < 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : string>?");
+                throw RunTimeException("ERROR (incorrect number of arguments) : string>?");
 
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
@@ -1355,13 +1203,13 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             for (auto & arg : args) {
                 if (auto atom = dynamic_pointer_cast<AtomNode>(arg)) {
                     if (atom->getType() != TokenType::STRING)
-                        throw RuntimeException("ERROR (string>? with incorrect argument type) : " + atom->toString());
+                        throw RunTimeException("ERROR (string>? with incorrect argument type) : " + atom->toString());
                     string str = atom->getValue();
                     if (str.length() >= 2 && str.front() == '"' && str.back() == '"')
                         str = str.substr(1, str.length() - 2);
                     strs.push_back(str);
                 } else {
-                    throw RuntimeException("ERROR (string>? with incorrect argument type)");
+                    throw RunTimeException("ERROR (string>? with incorrect argument type)");
                 }
             }
             bool resultBool = true;
@@ -1376,7 +1224,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
         }
         else if (op == "string<?") {
             if (elems.size() < 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : string<?");
+                throw RunTimeException("ERROR (incorrect number of arguments) : string<?");
 
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
@@ -1387,13 +1235,13 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             for (auto & arg : args) {
                 if (auto atom = dynamic_pointer_cast<AtomNode>(arg)) {
                     if (atom->getType() != TokenType::STRING)
-                        throw RuntimeException("ERROR (string<? with incorrect argument type) : " + atom->toString());
+                        throw RunTimeException("ERROR (string<? with incorrect argument type) : " + atom->toString());
                     string str = atom->getValue();
                     if (str.length() >= 2 && str.front() == '"' && str.back() == '"')
                         str = str.substr(1, str.length() - 2);
                     strs.push_back(str);
                 } else {
-                    throw RuntimeException("ERROR (string<? with incorrect argument type)");
+                    throw RunTimeException("ERROR (string<? with incorrect argument type)");
                 }
             }
             bool resultBool = true;
@@ -1408,7 +1256,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
         }
         else if (op == "string=?") {
             if (elems.size() < 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : string=?");
+                throw RunTimeException("ERROR (incorrect number of arguments) : string=?");
 
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
@@ -1419,13 +1267,13 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             for (auto & arg : args) {
                 if (auto atom = dynamic_pointer_cast<AtomNode>(arg)) {
                     if (atom->getType() != TokenType::STRING)
-                        throw RuntimeException("ERROR (string=? with incorrect argument type) : " + atom->toString());
+                        throw RunTimeException("ERROR (string=? with incorrect argument type) : " + atom->toString());
                     string str = atom->getValue();
                     if (str.length() >= 2 && str.front() == '"' && str.back() == '"')
                         str = str.substr(1, str.length() - 2);
                     strs.push_back(str);
                 } else {
-                    throw RuntimeException("ERROR (string=? with incorrect argument type)");
+                    throw RunTimeException("ERROR (string=? with incorrect argument type)");
                 }
             }
             bool allEqual = true;
@@ -1441,7 +1289,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
         else if (op == "eqv?") {
             if (elems.size() != 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : eqv?");
+                throw RunTimeException("ERROR (incorrect number of arguments) : eqv?");
 
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
@@ -1464,7 +1312,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
         }
         else if (op == "equal?") {
             if (elems.size() != 3)
-                throw RuntimeException("ERROR (incorrect number of arguments) : equal?");
+                throw RunTimeException("ERROR (incorrect number of arguments) : equal?");
 
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
@@ -1495,11 +1343,169 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                 return make_shared<AtomNode>(TokenType::NIL, "nil");
         }
 
+        else if (op == "atom?") {
+            if (elems.size() != 2)
+                throw RunTimeException("ERROR (incorrect number of arguments) : atom?");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            return dynamic_pointer_cast<DotNode>(args[0])
+                   ? make_shared<AtomNode>(TokenType::NIL, "nil")
+                   : make_shared<AtomNode>(TokenType::T, "#t");
+        }
+        else if (op == "pair?") {
+            if (elems.size() != 2)
+                throw RunTimeException("ERROR (incorrect number of arguments) : pair?");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            return dynamic_pointer_cast<DotNode>(args[0])
+                   ? make_shared<AtomNode>(TokenType::T, "#t")
+                   : make_shared<AtomNode>(TokenType::NIL, "nil");
+        }
+        else if (op == "list?") {
+            if (elems.size() != 2)
+                throw RunTimeException("ERROR (incorrect number of arguments) : list?");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            bool proper = false;
+            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
+                proper = (atom->getValue() == "nil");
+            else
+                proper = isProperList(args[0]);
+            return proper ? make_shared<AtomNode>(TokenType::T, "#t")
+                          : make_shared<AtomNode>(TokenType::NIL, "nil");
+        }
+        else if (op == "null?") {
+            if (elems.size() != 2)
+                throw RunTimeException("ERROR (incorrect number of arguments) : null?");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
+                return (atom->getValue() == "nil")
+                       ? make_shared<AtomNode>(TokenType::T, "#t")
+                       : make_shared<AtomNode>(TokenType::NIL, "nil");
+            else
+                return make_shared<AtomNode>(TokenType::NIL, "nil");
+        }
+        else if (op == "integer?") {
+            if (elems.size() != 2)
+                throw RunTimeException("ERROR (incorrect number of arguments) : integer?");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
+                return (atom->getType() == TokenType::INT)
+                       ? make_shared<AtomNode>(TokenType::T, "#t")
+                       : make_shared<AtomNode>(TokenType::NIL, "nil");
+            else
+                return make_shared<AtomNode>(TokenType::NIL, "nil");
+        }
+        else if (op == "real?") {
+            if (elems.size() != 2)
+                throw RunTimeException("ERROR (incorrect number of arguments) : real?");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
+                return ((atom->getType() == TokenType::INT || atom->getType() == TokenType::FLOAT)
+                        ? make_shared<AtomNode>(TokenType::T, "#t")
+                        : make_shared<AtomNode>(TokenType::NIL, "nil"));
+            else
+                return make_shared<AtomNode>(TokenType::NIL, "nil");
+        }
+        else if (op == "number?") {
+            if (elems.size() != 2)
+                throw RunTimeException("ERROR (incorrect number of arguments) : number?");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
+                return ((atom->getType() == TokenType::INT || atom->getType() == TokenType::FLOAT)
+                        ? make_shared<AtomNode>(TokenType::T, "#t")
+                        : make_shared<AtomNode>(TokenType::NIL, "nil"));
+            else
+                return make_shared<AtomNode>(TokenType::NIL, "nil");
+        }
+        else if (op == "string?") {
+            if (elems.size() != 2)
+                throw RunTimeException("ERROR (incorrect number of arguments) : string?");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
+                return (atom->getType() == TokenType::STRING
+                        ? make_shared<AtomNode>(TokenType::T, "#t")
+                        : make_shared<AtomNode>(TokenType::NIL, "nil"));
+            else
+                return make_shared<AtomNode>(TokenType::NIL, "nil");
+        }
+        else if (op == "boolean?") {
+            if (elems.size() != 2)
+                throw RunTimeException("ERROR (incorrect number of arguments) : boolean?");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0])) {
+                if (atom->getType() == TokenType::T || atom->getType() == TokenType::NIL)
+                    return make_shared<AtomNode>(TokenType::T, "#t");
+                else
+                    return make_shared<AtomNode>(TokenType::NIL, "nil");
+            }
+            else
+                return make_shared<AtomNode>(TokenType::NIL, "nil");
+        }
+        else if (op == "symbol?") {
+            if (elems.size() != 2)
+                throw RunTimeException("ERROR (incorrect number of arguments) : symbol?");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
+                return (atom->getType() == TokenType::SYMBOL
+                        ? make_shared<AtomNode>(TokenType::T, "#t")
+                        : make_shared<AtomNode>(TokenType::NIL, "nil"));
+            else
+                return make_shared<AtomNode>(TokenType::NIL, "nil");
+        }
+
         else
-            throw RuntimeException("ERROR (unbound symbol) : " + op);
+            throw RunTimeException("ERROR (unbound symbol) : " + op);
     }
 
-    throw RuntimeException("ERROR (unknown expression) : " + node->toString());
+    throw RunTimeException("ERROR (unknown expression) : " + node->toString());
 }
 
 int main() {
@@ -1514,26 +1520,22 @@ int main() {
             try {
                 // Parse the tokens if the expression is complete
                 Parser parser;
-                shared_ptr<Node> ast = parser.parse();
-                shared_ptr<Node> result = EvalSExp(true, ast);
+                shared_ptr<Node> result = EvalSExp(true, parser.parse());
 
-                cout << endl << "> ";
-//                // If the parsed expression is "(exit)", throw exception to exit
-//                if (isExitExpression(ast))
-//                    throw ExitException();
-
-                cout << Printer::print(result) << endl;
+                cout << endl << "> " << Printer::print(result) << endl;
 
                 Scanner::skipIfLineLeftoverEmpty();
-            } catch (const RuntimeException& e) {
+            } catch (const CompileTimeException& e) {
+                cout << endl << "> " << e.what() << endl;
                 string line;
                 getline(cin, line);
+            } catch (const RunTimeException& e) {
                 cout << endl << "> " << e.what() << endl;
             }
         }
 
     } catch (const EOFException& e) {
-        cout << endl << "> " << e.what();
+        cout << endl << "> ERROR (no more input) : END-OF-FILE encountered";
     } catch (const ExitException& e) {
         cout << endl << "> ";
     }
