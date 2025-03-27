@@ -429,5 +429,661 @@ else ; should get >>(1 2)<<
 (cond ((> a b) 1)
       (else 2)
       (else else)
-) ; should get nil(exit 0)
+) ; should get nil
+
+
+; =============== Problem 11 可見數據 ====================
+ab
+(define a "=============== Problem 11 viewable case =================")
+a
+
+(clean-environment)
+
+a
+
+(begin)
+(begin 3)
+(begin 3 4 5)
+(begin 3 4 d)
+(begin 3 4 d (exit))
+(begin 3 4 (exit))
+
+(begin
+   (car '(1 2 3))
+   (cdr '(1 2 3))
+)
+
+(begin
+   (list '(1 2 3))
+)
+
+(begin
+   ( list '(1 2 3) (cons 2 d) )
+)
+
+(define a 5)
+
+( and        ; 'and' either returns the evaluated result of
+  (pair? 3)  ; the first one that is evaluated to nil
+  a          ; or the evaluated result of the last one
+)
+
+( and #t a )
+
+( or         ; 'or' either returns the evaluated result of
+  a          ; the first one that is not evaluated to nil
+  (null? ()) ; or the evaluated result of the last one
+)
+
+ (car (cdr '(Hi! How is it going ?)))
+ (cdr (cdr '(To be or not to be ?)))
+ (cdr (car '(That is the question !)))
+ (car (car (cons "Hi," " Everybody!")))
+ (cdr (list "Hi," " Everybody!" "Wake up!"))
+
+(and
+ (car (cdr '(Hi! How is it going ?)))
+ (cdr (cdr '(To be or not to be ?)))
+ (cdr (car '(That is the question !)))
+ (car (car (cons "Hi," " Everybody!")))
+ (cdr (list "Hi," " Everybody!" "Wake up!"))
+)
+
+(and
+ (car (cdr '(Hi! How is it going ?)))
+ (not (cdr (cdr '(To be or not to be ?))))
+ (cdr (car '(That is the question !)))
+ (car (car (cons "Hi," " Everybody!")))
+ (cdr (list "Hi," " Everybody!" "Wake up!"))
+)
+
+(and
+ (and (car (cdr '(Hi! How is it going ?))) 5)
+ (not (not (cdr (cdr '(To be or not to be ?)))))
+ (cdr (car '(That is the question !)))
+ (car (car (cons "Hi," " Everybody!")))
+ (cdr (list "Hi," " Everybody!" "Wake up!"))
+)
+
+; ------- functional compositions (same category) -------
+
+(define hello "\"CYCU ICE\"")
+(define there "Number One!")
+(cons (car (list hello there)) there)
+
+(define a '(30 40))
+(cons 5 a)
+a
+(define a (cons 3 a))
+(cons (cons 5 a) a)
+a
+(car (car (cons a a)))
+(cdr (list a a (car (car (cons a a)))))
+(define a (cdr (list a a (car (car (cons a a)))))
+)
+(car (cdr a))
+(cons (car (cdr (cdr (car a))))
+      (cdr a)
+)
+(define a
+ (list (car (cdr a))
+       (cons (car (cdr (cdr (car a))))
+             (cdr a)
+       )
+       (car (cdr a))
+ )
+)
+a
+(define b a)
+(define b (cons (list a b) a))
+b
+(cons (car b) (car (cdr b)))
+
+; ------- functional compositions (same category) -------
+
+(define a 5)
+(define b 10)
+(define c 20)
+(define list1 '(11 22 33))
+(define list2 '(12 23 34))
+(define str1 "abc")
+(define str2 (string-append "d" "de"))
+(define var1
+ (- ( + (- a b) (* c a 3)
+    )
+    (* a (+ b c (car list1)))
+    (car (cdr list2))
+ )
+)
+(>= var1 (car (cdr (cdr list2))))
+(string>? (string-append "Hello" str1)
+          str2
+)
+(not (> a 3))
+(+ (/ b (- c (* b 2))) a)
+; etc.
+
+; ------- functional compositions (different categories) -------
+
+(cons
+  (cons (+ 30 50)
+        (cdr '(The sun shines bright))
+  )
+  (list (null? '())
+        (pair? '(30 (40)))
+        (- (+ 5 7) (+ 2 3))
+        '(1 2 . (3))
+  )
+)
+(if (> a b)
+    (* a
+      (+ (car list1)
+         (car (cdr list2)))
+    )
+    (* b
+      (+ (car list2)
+         (car (cdr list1)))
+    )
+)
+(if (not (> a b))
+    (* a
+      (+ (car list1)
+         (car (cdr list2)))
+    )
+    (* b
+      (+ (car list2)
+         (car (cdr list1)))
+    )
+)
+
+(define d 20)
+(begin
+   3 4 d)
+(begin
+   (+ 3 5)
+   (- 4 5)
+   (* d d)
+  )
+(define a 20)
+(define b 40)
+
+(list
+     ( if (> a b)
+          (+ a (* a b))
+          (- b (+ a a))
+     )
+
+          ( begin
+            (- b (+ a a))
+            (> 70 b)
+          )
+)
+(if #t (begin 3 4 5))
+(if #t (3 4 5) (6 7))
+(if #f (3 4 5) (6 7))
+(cond ((> 5 3) 'good 'better 'best) (#t 'OK?)   )
+(define a (+ a b a))
+
+(cond ( (> a b) (+ a b) (- a b) (* a b) )
+      (  else 'OK? )
+)
+
+(cond ( (> a b)
+        (+ a b) (- a b) (- a Look!) (* a b)
+      )
+      (  #t
+         'OK?
+      )
+)
+
+(cond ( (< a b)
+        (+ a b) (- a b) (- a Look!) (* a b)
+      )
+      (  #t
+         ( list 'OK? 'Correct? )
+         ( cons 'OK? 'Correct? )
+      )
+)
+
+(exit 20)
+(car (cons (exit 20) (+ 5 3)))
+(car (cons (define abc 20) (+ 5 3)))
+(car (cons (exit 20)))
+(car (cons (+ 5 "Hi") (exit 20)))
+(car (cons (+ 5 (car '(10 20))) (exit 20)))
+(cons 10 20 (+ 5 "Hi"))
+
+; =============== Problem 12 可見數據 ====================
+ab
+(define a "=============== Problem 12 viewable case =================")
+a
+
+(clean-environment)
+
+; ------- Some newly added stuff -------
+
+; In OurScheme (and Lisp too), there is no discrimination against
+; functions
+
+cons ; the binding of this (primitive) symbol is a function
+car  ; the binding of this (primitive) symbol is also a function
+
+(define myCons cons) ; just like int/float/string can be the binding
+(define myCar car)   ; of a symbol, a function can be a binding too
+
+myCons ; what is the (current) binding of this symbol?
+
+(myCons cons myCar) ; the evaluated result of 'myCons' is a function
+(myCons 3 '(4 myCar))
+
+((myCar (cons myCons cons)) '(10) 20)
+
+
+
+
+(begin
+   (myCar '(1 2 3))
+   (cdr '(1 2 3))
+   (car (cdr '(1 (20 myCons))))
+)
+
+(begin
+   (list (list 1 - 3 +)
+         (myCons 25 car)
+   )
+)
+((myCar (cons myCons cons))
+ (cdr (cdr '(Hi! (How is) (it) going ?))))
+
+(define >? string>?)
+(define <? string<?)
+(define =? string=?)
+
+(define first "CYCU")
+(define second "NCU")
+(define third "NSYU")
+
+(define cc
+        (if (>? first second)
+            "Good"
+            (if (<? first second)
+                "Bad"
+                "So So"
+            )
+        )
+)
+cc
+
+(if (=? second first)
+    "Really?"
+    (if (>? second first)
+        "OK."
+        (if (<? second first)
+            "Must be."
+            "Impossible."
+        )
+    )
+)
+
+(begin
+   (car '(1 2 3))
+   (CDR (cons 3 x))
+   (car (cdr y))
+)
+
+(begin
+   (list '(1 2 3)
+         (cons 25 35)
+   )
+)(begin)(car (cdr (cdr '(Hi! (How is) (it) going ?))))
+(cons 'Whether (cdr (cdr '(To be or not to be ?)))
+)
+(cdr (car (cons '(That is the question !) ()
+          )
+     )
+)
+
+(cdr (car (cons "Hi," " Everybody!")
+     )
+)
+(cdr (cdr (list "Hi," " Everybody!" "Wake up!")))
+(define sun-shine '(The sun shines bright))
+(define money 50)
+
+(cons (- (+ 30 money) 40)
+      (cdr (cdr sun-shine))
+)
+(define a 20)
+(define d 20)
+(define b 40)
+(if (> a (+ b d))
+    +
+    /
+)
+(+ d
+     ( if (> a b)
+          (+ a (* a b))
+          (- b (+ a a))
+     )
+  )
+(+ d
+     ( if (> a b)
+          (+ a (* a b))
+          ( begin
+            (- b (+ a a))
+            70
+          )
+     )
+  )
+(if #t (begin 3 4 a) (begin 6 7))
+(if (> b a) ((+ 1 2) 4 5) (6 7))
+(if (< b a) ((+ 1 2) 4 5) (a 7))
+(cond ( (> b a) "Good" "Better" "Best")
+        ( #t 'Never 'let 'it 'rest!)   )
+(define a (+ a b a))
+
+(cond ( (> (* a 2) (* b 2)) (+ a b) (+ (- a b) (* a b)) )
+      ( (> a b) Look! )
+      ( (< 20 10) It's a bird !)
+      (  It's a plane ! )
+      (  #t It's Superman !  )
+)
+
+(cond ( (> (* a 2) (* b 2)) (+ a b) (+ (- a b) (* Look! b)) )
+      ( (> a b) 100 )
+      ( (< 20 10) It's a bird !)
+      (  It's a plane ! )
+      (  #t It's Superman !  )
+)
+
+(cond ( (< a b)
+        (+ a b) (- a b) (- a Look!) (* a b)
+      )
+      (  #t
+         ( list
+                ( list 'OK? 'Correct? )
+                ( list 'OK? 'Correct? )
+         )
+      )
+)
+
+(define opr-list
+        (list (list cons car cdr)
+              (list + - * /)
+              (list pair? atom?)
+        )
+)
+
+((car (car opr-list)) (car (car opr-list))
+                      (car (cdr (cdr opr-list)))
+)
+
+( ((car (car opr-list)) (car (car opr-list))
+                        (car (cdr (cdr opr-list)))
+  )
+  (car '(30 40))
+)
+
+( (car (cdr ((car (car opr-list)) (car (car opr-list))
+                                  (car (cdr (cdr opr-list)))
+            )
+       )
+  )
+  (car '(30 40))
+)
+
+( (car (cdr ((car (car opr-list)) (car (car opr-list))
+                                  (car (cdr (cdr opr-list)))
+            )
+       )
+  )
+  (car '((30) 40))
+)
+
+; =============== Problem 13 可見數據 ====================
+ab
+(define a "=============== Problem 13 viewable case =================")
+a
+
+(clean-environment)
+a
+
+(define operators (list + - * /))
+( (car (cdr operators))
+  ((car operators) 10 20)
+  ((car (cdr (cdr operators))) 11 22)
+)
+
+(define listOfNum '(10.1254 20.318503 30.1 40.2 50 60 70 80.999 90.9)
+)
+(define listOfStr '("What?" "When?" "Where?" "Who?" "How?" "Why?" "How come?")
+)
+(define listOfSym '(What? When? Where? Who? How? Why? HowCome?)
+)
+(cons (car listOfSym)
+      (cons (car (cdr listOfStr))
+            (list (car (cdr (cdr listOfNum))))
+      )
+)
+(cons (car (cdr (cdr listOfNum)))
+      (cons (car (cdr listOfStr))
+            (list (car listOfSym))
+      )
+)
+
+(define abc
+  (list
+    (cons (car listOfSym)
+          (cons (car (cdr listOfStr))
+                (list (car (cdr (cdr listOfNum))))
+          )
+    ) ; cons
+    (cons (car (cdr (cdr listOfNum)))
+          (cons (car (cdr listOfStr))
+                (list (car listOfSym))
+          )
+    ) ; cons
+  ) ; list
+) ; define
+abc
+(cons (car (car abc))
+      (cdr abc)
+)
+(cons (car (car (car abc)))
+      (cdr abc)
+)
+
+(define efg
+  (cons (car abc)
+        (car (cdr abc))
+  )
+)
+efg
+abc
+(define ++ (car operators))
+(define -- (car (cdr operators)))
+( ++ (car listOfNum)
+    (car (cdr listOfNum))
+    (car (cdr (cdr listOfNum)))
+)
+( -- ( ++ (car listOfNum)
+          (car (cdr listOfNum))
+          (car (cdr (cdr listOfNum)))
+     )
+     ( if ( string>? (car listOfStr) (car (cdr listOfStr))
+          )
+         10
+         15
+     )
+)
+( -- ( ++ (car listOfNum)
+          (car (cdr listOfNum))
+          (car (cdr (cdr listOfStr)))
+      )
+      ( if ( string>? (car listOfStr) (car (cdr listOfStr))
+           )
+           10
+           15
+      )
+   )
+( -- ( ++ (car listOfNum)
+          (car (cdr listOfNum))
+          (car (cdr (cdr listOfNum)))
+      )
+      ( if ( string>? (car listOfStr) (car (cdr listOfStr))
+           )
+           (car listOfStr)
+           (car listOfSym)
+      )
+   )
+( -- ( ++ (car listOfNum)
+          (car (cdr listOfNum))
+          (car (cdr (cdr listOfNum)))
+      )
+      ( if ( string>? (car listOfStr) (car (cdr listOfStr))
+           )
+           (car listOfStr)
+           (car listOfSym)
+           (cdr listOfNum)
+      )
+   )
+( -- ( ++ (car listOfNum)
+          (car (cdr listOfNum))
+          (car (cdr (cdr listOfNum)))
+      )
+      ( if ( string>? (car listOfStr) (car (cdr listOfStr))
+           )
+           (car listOfStr)
+      )
+   )
+( -- ( ++ (car listOfNum)
+          (car (cdr listOfNum))
+          (car (car (cdr (cdr listOfNum))))
+      )
+      ( if ( string>? (car listOfStr) (car (cdr listOfStr))
+           )
+           (car Look!)
+           (car "It's a plane!")
+      )
+   )
+( -- ( ++ (car listOfNum)
+          (car (cdr listOfNum))
+          (car (cdr (cdr listOfNum)))
+      )
+      ( if ( string>? (car listOfStr) (car (cdr listOfStr))
+           )
+           (car Look!)
+           (car "It's a plane!")
+      )
+   )
+( -- ( ++ (car listOfNum)
+          (car (cdr listOfNum))
+          (car (cdr (cdr listOfNum)))
+      )
+      ( if ( string>? (car listOfStr) (car (cdr listOfStr))
+           )
+           (car Look!)
+           (car It's a plane!)
+      )
+   )
+( -- ( ++ (car listOfNum)
+          (car (cdr listOfNum))
+          (car (car (cdr (cdr listOfNum listOfNum))))
+      )
+      ( if ( string>? (car listOfStr) (car (cdr listOfStr))
+           )
+           (car Look!)
+           (car It's a plane!)
+      )
+   )
+(define What? (car listOfNum))
+(define When? (car (cdr listOfNum)))
+listOfSym
+( cons (list (car listOfSym)
+               What?
+         )
+         (cdr listOfSym)
+  )
+listOfSym
+(define listOfSym
+          ( cons (list (car listOfSym)
+                       What?
+                 )
+                 (cdr listOfSym)
+          )
+  )
+listOfSym
+( cons (car listOfSym)
+         ( cons (list (car (cdr listOfSym))
+                      When?
+                )
+                (cdr (cdr listOfSym))
+         )
+  )
+listOfSym
+(define listOfSym
+          ( cons (car listOfSym)
+                 ( cons (list (car (cdr listOfSym))
+                              When?
+                        )
+                        (cdr (cdr listOfSym))
+                 )
+          )
+  )
+listOfSym
+(define listOfSym '(What? When? Where? Who? How? Why? HowCome?)
+)
+listOfSym
+(define listOfSym
+          ( cons (list (car listOfSym)
+                       (car listOfNum)
+                 )
+                 (cdr listOfSym)
+          )
+  )
+listOfSym
+(define listOfSym
+          ( cons (car listOfSym)
+                 ( cons (list (car (cdr listOfSym))
+                              (car (cdr listOfNum))
+                        )
+                        (cdr (cdr listOfSym))
+                 )
+          )
+  )
+listOfSym
+
+
+(define listOfSym
+          ( cons (car listOfSym)
+                 ( cons (list (car (cdr listOfSym))
+                              When?
+                        )
+                        (cdr (cdr listOfSym))
+                 )
+          )
+  )
+listOfSym
+(define listOfSym '(What? When? Where? Who? How? Why? HowCome?)
+)
+listOfSym
+(define listOfSym
+          ( cons (list (car listOfSym)
+                       (car listOfNum)
+                 )
+                 (cdr listOfSym)
+          )
+  )
+listOfSym
+(define listOfSym
+          ( cons (car listOfSym)
+                 ( cons (list (car (cdr listOfSym))
+                              (car (cdr listOfNum))
+                        )
+                        (cdr (cdr listOfSym))
+                 )
+          )
+  )
+listOfSym
+
 (exit)

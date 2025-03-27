@@ -4,7 +4,6 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -236,29 +235,29 @@ public:
     }
 
     Token peekToken() {
-        buffer.clear();
+        istream::pos_type startPos = cin.tellg();
         int tLine = line, tColumn = column;
         Token token = scanToken();
         line = tLine, column = tColumn;
-        reverse(buffer.begin(), buffer.end());
-        for (char c : buffer)
-            putback(c);
+        cin.clear();
+        cin.seekg(startPos);
         return token;
     }
 
     static void skipIfLineLeftoverEmpty() {
+        istream::pos_type startPos = cin.tellg();
+
         string line;
         getline(cin, line);
-        line = splitStringAtFirstSemicolon(line);
-        line += '\n';
-        if (isOnlyWhitespace(line))
-            return;
-
-        else {
-            reverse(line.begin(), line.end());
-            for (char c : line)
-                putback(c);
+        line = splitStringAtFirstSemicolon(line) + '\n';
+        while (isOnlyWhitespace(line)) {
+            startPos = cin.tellg();
+            getline(cin, line);
+            line = splitStringAtFirstSemicolon(line) + '\n';
         }
+
+        cin.clear();
+        cin.seekg(startPos);
     }
 
 private:
@@ -377,10 +376,7 @@ private:
 
     // Advance the current position and return the character
     char advance() {
-        if (cin.peek() == EOF)
-            throw EOFException();
-
-        else if (peek() == '\n') {
+        if (peek() == '\n') {
             line++;
             column = 0;
         }
@@ -395,7 +391,11 @@ private:
 
     // Return the current character without advancing the position
     [[nodiscard]] static char peek() {
-        return static_cast<char>(cin.peek());
+        if (!cin.good())
+            throw EOFException();
+
+        else
+            return static_cast<char>(cin.peek());
     }
 
     // Skip the whitespace characters
@@ -424,10 +424,6 @@ private:
         }
 
         return line;
-    }
-
-    static void putback(char c) {
-        cin.putback(c);
     }
 };
 
@@ -492,9 +488,11 @@ private:
 
         // Parse remaining expressions until DOT or RIGHT_PAREN
         vector<shared_ptr<Node>> restExpressions;
-        while (scanner.peekToken().type != TokenType::RIGHT_PAREN &&
-               scanner.peekToken().type != TokenType::DOT)
+        Token tToken = scanner.peekToken();
+        while (tToken.type != TokenType::RIGHT_PAREN && tToken.type != TokenType::DOT) {
             restExpressions.push_back(parseExpression());
+            tToken = scanner.peekToken();
+        }
 
         // Check if we have a dotted pair
         if (scanner.peekToken().type == TokenType::DOT) {
@@ -525,14 +523,13 @@ private:
 
         // It's a proper list (not a dotted pair)
         else {
-            if (scanner.peekToken().type != TokenType::RIGHT_PAREN) {
-                Token token = scanner.scanToken();
+            Token token = scanner.scanToken();
+            if (token.type != TokenType::RIGHT_PAREN) {
                 throw CompileTimeException(
                         "ERROR (unexpected token) : ')' expected when token at Line " +
                         to_string(token.line) + " Column " + to_string(token.column) +
                         " is >>" + token.value + "<<" );
             }
-            scanner.scanToken(); // skip ')'
 
             // Build a proper list - all nodes linked with the last pointing to nil
             shared_ptr<Node> result = make_shared<AtomNode>(TokenType::NIL, "nil");
@@ -707,7 +704,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
         if (atom->getType() == TokenType::SYMBOL) {
             string sym = atom->getValue();
             // If the symbol is bound in the environment, return its binding.
-            // If the symbol is bound in the built environment, return a placeholder
+            // If the symbol is bound in the built environment, return a placeholder.
             // Otherwise, throw error.
             if (globalEnv.find(sym) != globalEnv.end())
                 return globalEnv[sym];
@@ -738,7 +735,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
         string op = atomOp->getValue();
 
-        // Look up for operator in the environment
+        // Execute for operator in the environment
         if (op.find("#<procedure ") != string::npos) {
             const string prefix = "#<procedure ";
             const string suffix = ">";
@@ -782,62 +779,68 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                 throw RunTimeException("ERROR (incorrect number of arguments) : exit");
             throw ExitException();
         }
+        else if (op == "if") {
+            if (elems.size() != 3 && elems.size() != 4)
+                throw RunTimeException("ERROR (incorrect number of arguments) : " + op);
+            auto condVal = EvalSExp(false, elems[1]);
+            bool condTrue;
+            if (auto atomCond = dynamic_pointer_cast<AtomNode>(condVal))
+                condTrue = (atomCond->getValue() != "nil");
+            else
+                condTrue = true;
+            if (condTrue)
+                return EvalSExp(false, elems[2]);
+            else {
+                if (elems.size() == 4)
+                    return EvalSExp(false, elems[3]);
+                else
+                    throw RunTimeException("ERROR (no return value) : " + Printer::print(node));
+            }
+        }
+        else if (op == "cond") {
+            if (elems.size() != 3)
+                throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
+            for (size_t i = 1; i < elems.size(); i++) {
+                vector<shared_ptr<Node>> clauseElems;
+                try {
+                    clauseElems = unrollList(elems[i]);
+                } catch (const RunTimeException& e) {
+                    throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
+                }
 
-//        else if (op == "if") {
-//            if (elems.size() != 3 && elems.size() != 4)
-//                throw RunTimeException("ERROR (incorrect number of arguments) : " + op);
-//            auto condVal = EvalSExp(false, elems[1]);
-//            bool condTrue;
-//            if (auto atomCond = dynamic_pointer_cast<AtomNode>(condVal))
-//                condTrue = (atomCond->getValue() != "nil");
-//            else
-//                condTrue = true;
-//            if (condTrue)
-//                return EvalSExp(false, elems[2]);
-//            else {
-//                if (elems.size() == 4)
-//                    return EvalSExp(false, elems[3]);
-//                else
-//                    throw RunTimeException("ERROR (no return value) : " + Printer::print(node));
-//            }
-//        }
-//        else if (op == "cond") {
-//            for (size_t i = 1; i < elems.size(); i++) {
-//                vector<shared_ptr<Node>> clauseElems = unrollList(elems[i]);
-//                if (clauseElems.empty())
-//                    throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
-//
-//                bool testMatches = false;
-//                bool isLastClause = (i == elems.size() - 1);
-//                auto firstElem = clauseElems[0];
-//
-//                // If this is the last clause and its test is literally the symbol "else",
-//                // then match unconditionally.
-//                if (isLastClause &&
-//                    dynamic_pointer_cast<AtomNode>(firstElem) &&
-//                    dynamic_pointer_cast<AtomNode>(firstElem)->getValue() == "else") {
-//                    testMatches = true;
-//                }
-//                else {
-//                    auto testVal = EvalSExp(false, firstElem);
-//                    if (auto atomTest = dynamic_pointer_cast<AtomNode>(testVal))
-//                        testMatches = (atomTest->getValue() != "nil");
-//                    else
-//                        testMatches = true;
-//                }
-//
-//                if (testMatches) {
-//                    if (clauseElems.size() == 1)
-//                        throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
-//                    shared_ptr<Node> res;
-//                    for (size_t j = 1; j < clauseElems.size(); j++)
-//                        res = EvalSExp(false, clauseElems[j]);
-//                    return res;
-//                }
-//            }
-//            throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
-//        }
+                if (clauseElems.empty())
+                    throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
 
+                bool testMatches = false;
+                bool isLastClause = (i == elems.size() - 1);
+                auto firstElem = clauseElems[0];
+
+                // If this is the last clause and its test is literally the symbol "else",
+                // then match unconditionally.
+                if (isLastClause &&
+                    dynamic_pointer_cast<AtomNode>(firstElem) &&
+                    dynamic_pointer_cast<AtomNode>(firstElem)->getValue() == "else") {
+                    testMatches = true;
+                }
+                else {
+                    auto testVal = EvalSExp(false, firstElem);
+                    if (auto atomTest = dynamic_pointer_cast<AtomNode>(testVal))
+                        testMatches = (atomTest->getValue() != "nil");
+                    else
+                        testMatches = true;
+                }
+
+                if (testMatches) {
+                    if (clauseElems.size() == 1)
+                        throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
+                    shared_ptr<Node> res;
+                    for (size_t j = 1; j < clauseElems.size(); j++)
+                        res = EvalSExp(false, clauseElems[j]);
+                    return res;
+                }
+            }
+            throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
+        }
         else if (op == "begin") {
             if (elems.size() < 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : begin");
@@ -862,34 +865,36 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             return make_shared<DotNode>(args[0], args[1]);
         }
-        else if (op == "car") {
-            if (elems.size() != 2)
-                throw RunTimeException("ERROR (incorrect number of arguments) : car");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            auto pairNode = dynamic_pointer_cast<DotNode>(args[0]);
-            if (!pairNode)
-                throw RunTimeException("ERROR (car with incorrect argument type) : " + args[0]->toString());
-            return pairNode->getLeft();
-        }
-        else if (op == "cdr") {
-            if (elems.size() != 2)
-                throw RunTimeException("ERROR (incorrect number of arguments) : cdr");
-
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            auto pairNode = dynamic_pointer_cast<DotNode>(args[0]);
-            if (!pairNode)
-                throw RunTimeException("ERROR (cdr with incorrect argument type) : " + args[0]->toString());
-            return pairNode->getRight();
-        }
+//        else if (op == "car") {
+//            if (elems.size() != 2)
+//                throw RunTimeException("ERROR (incorrect number of arguments) : car");
+//
+//            // Evaluate operands for the remaining built-in functions.
+//            vector<shared_ptr<Node>> args;
+//            for (size_t i = 1; i < elems.size(); i++)
+//                args.push_back(EvalSExp(false, elems[i]));
+//
+//            auto pairNode = dynamic_pointer_cast<DotNode>(args[0]);
+//            if (!pairNode)
+//                throw RunTimeException("ERROR (car with incorrect argument type) : " + args[0]->toString());
+//
+//            return pairNode->getLeft();
+//        }
+//        else if (op == "cdr") {
+//            if (elems.size() != 2)
+//                throw RunTimeException("ERROR (incorrect number of arguments) : cdr");
+//
+//            // Evaluate operands for the remaining built-in functions.
+//            vector<shared_ptr<Node>> args;
+//            for (size_t i = 1; i < elems.size(); i++)
+//                args.push_back(EvalSExp(false, elems[i]));
+//
+//            auto pairNode = dynamic_pointer_cast<DotNode>(args[0]);
+//            if (!pairNode)
+//                throw RunTimeException("ERROR (cdr with incorrect argument type) : " + args[0]->toString());
+//
+//            return pairNode->getRight();
+//        }
         else if (op == "list") {
             shared_ptr<Node> list = make_shared<AtomNode>(TokenType::NIL, "nil");
 
@@ -1129,7 +1134,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                          : make_shared<AtomNode>(TokenType::T, "#t");
         }
         else if (op == "and") {
-            if (elems.size() < 2)
+            if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : and");
             shared_ptr<Node> lastEvaluated;
             for (size_t i = 1; i < elems.size(); i++) {
@@ -1145,7 +1150,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             return lastEvaluated;
         }
         else if (op == "or") {
-            if (elems.size() < 2)
+            if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : or");
             for (size_t i = 1; i < elems.size(); i++) {
                 auto val = EvalSExp(false, elems[i]);
@@ -1526,6 +1531,7 @@ int main() {
                 getline(cin, line);
             } catch (const RunTimeException& e) {
                 cout << endl << "> " << e.what() << endl;
+                Scanner::skipIfLineLeftoverEmpty();
             }
         }
 
