@@ -723,8 +723,11 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             throw RunTimeException("ERROR (attempt to apply non-function) : " + node->toString());
 
         // Evaluate the operator
-        const auto& opNode = elems[0];
-        auto atomOp = dynamic_pointer_cast<AtomNode>(EvalSExp(false, opNode));
+        const auto& opNode = EvalSExp(false, elems[0]);
+        auto atomOp = dynamic_pointer_cast<AtomNode>(opNode);
+
+        if (!atomOp)
+            throw RunTimeException("ERROR (attempt to apply non-function) : " + Printer::print(opNode));
 
         if (atomOp->getType() != TokenType::SYMBOL)
             throw RunTimeException("ERROR (attempt to apply non-function) : " + atomOp->getValue());
@@ -794,48 +797,74 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             }
         }
         else if (op == "cond") {
-            if (elems.size() != 3)
+            if (elems.size() < 2)
                 throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
-            for (size_t i = 1; i < elems.size(); i++) {
-                vector<shared_ptr<Node>> clauseElems;
-                try {
-                    clauseElems = unrollList(elems[i]);
-                } catch (const RunTimeException& e) {
-                    throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
-                }
 
+            // Pre-check: validate every clause is a proper list and non-empty
+            for (size_t i = 1; i < elems.size(); i++) {
+                auto clause = elems[i];
+                if (!isProperList(clause))
+                    throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
+
+                vector<shared_ptr<Node>> clauseElems = unrollList(clause);
                 if (clauseElems.empty())
                     throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
 
-                bool testMatches = false;
-                bool isLastClause = (i == elems.size() - 1);
-                auto firstElem = clauseElems[0];
+                else if (clauseElems.size() < 2)
+                    throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
+            }
 
-                // If this is the last clause and its test is literally the symbol "else",
-                // then match unconditionally.
-                if (isLastClause &&
-                    dynamic_pointer_cast<AtomNode>(firstElem) &&
-                    dynamic_pointer_cast<AtomNode>(firstElem)->getValue() == "else") {
-                    testMatches = true;
+            // Iterate over each clause
+            for (size_t i = 1; i < elems.size(); i++) {
+                auto clause = elems[i];
+                // Each clause must be a proper list.
+                if (!isProperList(clause))
+                    throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
+
+                // Unroll the clause into its component expressions.
+                vector<shared_ptr<Node>> clauseElems = unrollList(clause);
+                if (clauseElems.empty())
+                    throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
+
+                bool clauseTrue = false;
+                shared_ptr<Node> testResult = nullptr;
+                // Check if this clause is an "else" clause (only valid as the last clause).
+                if (auto testAtom = dynamic_pointer_cast<AtomNode>(clauseElems[0])) {
+                    if (testAtom->getValue() == "else" && i == elems.size() - 1) {
+                        clauseTrue = true;
+                    }
+                    else {
+                        testResult = EvalSExp(false, clauseElems[0]);
+                        // Consider the test true if its evaluated result is not nil.
+                        if (auto atomTest = dynamic_pointer_cast<AtomNode>(testResult))
+                            clauseTrue = (atomTest->getValue() != "nil");
+                        else
+                            clauseTrue = true;
+                    }
                 }
                 else {
-                    auto testVal = EvalSExp(false, firstElem);
-                    if (auto atomTest = dynamic_pointer_cast<AtomNode>(testVal))
-                        testMatches = (atomTest->getValue() != "nil");
+                    testResult = EvalSExp(false, clauseElems[0]);
+                    if (auto atomTest = dynamic_pointer_cast<AtomNode>(testResult))
+                        clauseTrue = (atomTest->getValue() != "nil");
                     else
-                        testMatches = true;
+                        clauseTrue = true;
                 }
 
-                if (testMatches) {
-                    if (clauseElems.size() == 1)
+                if (clauseTrue) {
+                    // If the clause has a body, evaluate it sequentially and return the value of the last expression.
+                    if (clauseElems.size() >= 2) {
+                        shared_ptr<Node> result;
+                        for (size_t j = 1; j < clauseElems.size(); j++) {
+                            result = EvalSExp(false, clauseElems[j]);
+                        }
+                        return result;
+                    }
+                    else
                         throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
-                    shared_ptr<Node> res;
-                    for (size_t j = 1; j < clauseElems.size(); j++)
-                        res = EvalSExp(false, clauseElems[j]);
-                    return res;
                 }
             }
-            throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
+            // If no clause yields a value, signal an error.
+            throw RunTimeException("ERROR (no return value) : " + Printer::print(node));
         }
         else if (op == "begin") {
             if (elems.size() < 2)
@@ -865,14 +894,12 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : car");
 
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            auto pairNode = dynamic_pointer_cast<DotNode>(args[0]);
+            // Evaluate the argument
+            shared_ptr<Node> argVal = EvalSExp(false, elems[1]);
+            // Check if the evaluated value is a pair (i.e. a DotNode)
+            auto pairNode = dynamic_pointer_cast<DotNode>(argVal);
             if (!pairNode)
-                throw RunTimeException("ERROR (car with incorrect argument type) : " + args[0]->toString());
+                throw RunTimeException("ERROR (car with incorrect argument type) : " + argVal->toString());
 
             return pairNode->getLeft();
         }
@@ -880,17 +907,16 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : cdr");
 
-            // Evaluate operands for the remaining built-in functions.
-            vector<shared_ptr<Node>> args;
-            for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
-
-            auto pairNode = dynamic_pointer_cast<DotNode>(args[0]);
+            // Evaluate the argument
+            shared_ptr<Node> argVal = EvalSExp(false, elems[1]);
+            // Check if the evaluated value is a pair (i.e. a DotNode)
+            auto pairNode = dynamic_pointer_cast<DotNode>(argVal);
             if (!pairNode)
-                throw RunTimeException("ERROR (cdr with incorrect argument type) : " + args[0]->toString());
+                throw RunTimeException("ERROR (cdr with incorrect argument type) : " + argVal->toString());
 
             return pairNode->getRight();
         }
+
         else if (op == "list") {
             shared_ptr<Node> list = make_shared<AtomNode>(TokenType::NIL, "nil");
 
