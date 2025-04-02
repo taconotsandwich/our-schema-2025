@@ -250,14 +250,10 @@ public:
         string line;
         getline(cin, line);
         line = splitStringAtFirstSemicolon(line) + '\n';
-        while (isOnlyWhitespace(line)) {
-            startPos = cin.tellg();
-            getline(cin, line);
-            line = splitStringAtFirstSemicolon(line) + '\n';
+        if (!isOnlyWhitespace(line)) {
+            cin.clear();
+            cin.seekg(startPos);
         }
-
-        cin.clear();
-        cin.seekg(startPos);
     }
 
 private:
@@ -865,36 +861,36 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             return make_shared<DotNode>(args[0], args[1]);
         }
-//        else if (op == "car") {
-//            if (elems.size() != 2)
-//                throw RunTimeException("ERROR (incorrect number of arguments) : car");
-//
-//            // Evaluate operands for the remaining built-in functions.
-//            vector<shared_ptr<Node>> args;
-//            for (size_t i = 1; i < elems.size(); i++)
-//                args.push_back(EvalSExp(false, elems[i]));
-//
-//            auto pairNode = dynamic_pointer_cast<DotNode>(args[0]);
-//            if (!pairNode)
-//                throw RunTimeException("ERROR (car with incorrect argument type) : " + args[0]->toString());
-//
-//            return pairNode->getLeft();
-//        }
-//        else if (op == "cdr") {
-//            if (elems.size() != 2)
-//                throw RunTimeException("ERROR (incorrect number of arguments) : cdr");
-//
-//            // Evaluate operands for the remaining built-in functions.
-//            vector<shared_ptr<Node>> args;
-//            for (size_t i = 1; i < elems.size(); i++)
-//                args.push_back(EvalSExp(false, elems[i]));
-//
-//            auto pairNode = dynamic_pointer_cast<DotNode>(args[0]);
-//            if (!pairNode)
-//                throw RunTimeException("ERROR (cdr with incorrect argument type) : " + args[0]->toString());
-//
-//            return pairNode->getRight();
-//        }
+        else if (op == "car") {
+            if (elems.size() != 2)
+                throw RunTimeException("ERROR (incorrect number of arguments) : car");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            auto pairNode = dynamic_pointer_cast<DotNode>(args[0]);
+            if (!pairNode)
+                throw RunTimeException("ERROR (car with incorrect argument type) : " + args[0]->toString());
+
+            return pairNode->getLeft();
+        }
+        else if (op == "cdr") {
+            if (elems.size() != 2)
+                throw RunTimeException("ERROR (incorrect number of arguments) : cdr");
+
+            // Evaluate operands for the remaining built-in functions.
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++)
+                args.push_back(EvalSExp(false, elems[i]));
+
+            auto pairNode = dynamic_pointer_cast<DotNode>(args[0]);
+            if (!pairNode)
+                throw RunTimeException("ERROR (cdr with incorrect argument type) : " + args[0]->toString());
+
+            return pairNode->getRight();
+        }
         else if (op == "list") {
             shared_ptr<Node> list = make_shared<AtomNode>(TokenType::NIL, "nil");
 
