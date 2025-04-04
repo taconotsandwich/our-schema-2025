@@ -64,51 +64,6 @@ struct Token {
             : type(t), value(std::move(v)), line(l), column(c) {}
 };
 
-// Debugger class to print items at runtime since CLion's debugger is fucked up
-class Debugger {
-public:
-    static void printTokenType(TokenType type) {
-        switch (TokenType (type)) {
-            case TokenType::LEFT_PAREN:
-                cout << "LEFT_PAREN" << endl;
-                break;
-            case TokenType::RIGHT_PAREN:
-                cout << "RIGHT_PAREN" << endl;
-                break;
-            case TokenType::INT:
-                cout << "INT" << endl;
-                break;
-            case TokenType::FLOAT:
-                cout << "FLOAT" << endl;
-                break;
-            case TokenType::DOT:
-                cout << "DOT" << endl;
-                break;
-            case TokenType::NIL:
-                cout << "NIL" << endl;
-                break;
-            case TokenType::T:
-                cout << "T" << endl;
-                break;
-            case TokenType::QUOTE:
-                cout << "QUOTE" << endl;
-                break;
-            case TokenType::SYMBOL:
-                cout << "SYMBOL" << endl;
-                break;
-            case TokenType::STRING:
-                cout << "STRING" << endl;
-                break;
-            default:
-                cout << "UNKNOWN" << endl;
-                break;
-        }
-    }
-
-    // Should be set to false before submission
-    static const bool isDebugging = false;
-};
-
 // Abstract class for the AST nodes
 class Node {
 public:
@@ -125,12 +80,9 @@ public:
     AtomNode(const TokenType t, string v) : type(t), value(std::move(v)) {}
 
     [[nodiscard]] string toString(int indent = 0) const override {
-        if (Debugger::isDebugging)
-            Debugger::printTokenType(type);
-
         // Normalize the float output
         if (type == TokenType::FLOAT) {
-            double num = stod(value);
+            const double num = stod(value);
             stringstream ss;
             ss << fixed << setprecision(3) << num;
             return ss.str();
@@ -308,9 +260,7 @@ private:
 
         if (isNumber(value))
             return scanNumber(value);
-
-        else
-            return scanSymbol(value);
+        return scanSymbol(value);
     }
 
     // Scan the number token
@@ -325,15 +275,11 @@ private:
     [[nodiscard]] Token scanSymbol(const string& value) const {
         if (value == "nil" || value == "#f")
             return Token(TokenType::NIL, "nil", line, column);
-
-        else if (value == "t" || value == "#t")
+        if (value == "t" || value == "#t")
             return Token(TokenType::T, "#t", line, column);
-
-        else if (value == ".")
+        if (value == ".")
             return Token(TokenType::DOT, ".", line, column);
-
-        else
-            return Token(TokenType::SYMBOL, value, line, column);
+        return Token(TokenType::SYMBOL, value, line, column);
     }
 
     // Check if the given string is a number
@@ -389,9 +335,7 @@ private:
     [[nodiscard]] static char peek() {
         if (!cin.good())
             throw EOFException();
-
-        else
-            return static_cast<char>(cin.peek());
+        return static_cast<char>(cin.peek());
     }
 
     // Skip the whitespace characters
@@ -499,7 +443,7 @@ private:
 
             // Ensure closing parenthesis
             if (scanner.peekToken().type != TokenType::RIGHT_PAREN) {
-                Token token = scanner.scanToken();
+                const Token token = scanner.scanToken();
                 throw CompileTimeException(
                         "ERROR (unexpected token) : ')' expected when token at Line " +
                         to_string(token.line) + " Column " + to_string(token.column) +
@@ -518,24 +462,22 @@ private:
         }
 
         // It's a proper list (not a dotted pair)
-        else {
-            Token token = scanner.scanToken();
-            if (token.type != TokenType::RIGHT_PAREN) {
-                throw CompileTimeException(
-                        "ERROR (unexpected token) : ')' expected when token at Line " +
-                        to_string(token.line) + " Column " + to_string(token.column) +
-                        " is >>" + token.value + "<<" );
-            }
-
-            // Build a proper list - all nodes linked with the last pointing to nil
-            shared_ptr<Node> result = make_shared<AtomNode>(TokenType::NIL, "nil");
-            for (int i = restExpressions.size() - 1; i >= 0; i--) {
-                result = make_shared<DotNode>(restExpressions[i], result);
-            }
-
-            // Add the first expression
-            return make_shared<DotNode>(firstExpr, result);
+        Token token = scanner.scanToken();
+        if (token.type != TokenType::RIGHT_PAREN) {
+            throw CompileTimeException(
+                "ERROR (unexpected token) : ')' expected when token at Line " +
+                to_string(token.line) + " Column " + to_string(token.column) +
+                " is >>" + token.value + "<<" );
         }
+
+        // Build a proper list - all nodes linked with the last pointing to nil
+        shared_ptr<Node> result = make_shared<AtomNode>(TokenType::NIL, "nil");
+        for (int i = restExpressions.size() - 1; i >= 0; i--) {
+            result = make_shared<DotNode>(restExpressions[i], result);
+        }
+
+        // Add the first expression
+        return make_shared<DotNode>(firstExpr, result);
     }
 };
 
@@ -589,7 +531,7 @@ private:
     // Helper to unroll a DotNode chain into its elements and tail.
     static void unrollList(const shared_ptr<Node>& node, vector<shared_ptr<Node>>& elems, shared_ptr<Node>& tail) {
         auto current = node;
-        while (auto d = dynamic_pointer_cast<DotNode>(current)) {
+        while (const auto d = dynamic_pointer_cast<DotNode>(current)) {
             elems.push_back(d->getLeft());
             current = d->getRight();
         }
@@ -624,8 +566,7 @@ vector<shared_ptr<Node>> unrollList(const shared_ptr<Node>& list) {
             auto atom = dynamic_pointer_cast<AtomNode>(curr);
             if (atom && atom->getValue() == "nil")
                 break;
-            else
-                throw CompileTimeException("ERROR (non-list) : " + Printer::print(list));
+            throw CompileTimeException("ERROR (non-list) : " + Printer::print(list));
         }
     }
     return elems;
@@ -690,7 +631,53 @@ bool structuralEqual(const shared_ptr<Node>& n1, const shared_ptr<Node>& n2) {
     return false;
 }
 
-shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
+shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node,
+                          unordered_map<string, shared_ptr<Node>>* env);
+
+// Procedure class to represent user-defined functions (closures)
+class Procedure final : public Node {
+public:
+    vector<string> params;                   // formal parameter names
+    vector<shared_ptr<Node>> body;           // one or more S-expressions
+    // The closure environment (we simply use a pointer to an environment mapping)
+    // In this minimal design we define an environment as an unordered_map.
+    unordered_map<string, shared_ptr<Node>> env;
+
+    Procedure(const vector<string>& params,
+              const vector<shared_ptr<Node>>& body,
+              const unordered_map<string, shared_ptr<Node>>& env)
+            : params(params), body(body), env(env) {}
+
+    // When printed, show an indicative string.
+    string toString(int indent = 0) const override {
+        return "#<procedure lambda>";
+    }
+
+    // Exec function to execute the procedure using evaluated arguments.
+    // It creates a new local environment extending the closure's environment.
+    shared_ptr<Node> Exec(const vector<shared_ptr<Node>>& args) {
+        if (args.size() != params.size())
+            throw RunTimeException("ERROR (incorrect number of arguments) : lambda expression");
+
+        // Create a new local environment by copying the closure environment.
+        unordered_map<string, shared_ptr<Node>> localEnv = env;
+        // Bind each formal parameter to its corresponding argument.
+        for (size_t i = 0; i < args.size(); i++) {
+            localEnv[params[i]] = args[i];
+        }
+
+        // Evaluate each expression in the procedure body sequentially.
+        shared_ptr<Node> result;
+        for (auto & expr : body)
+            result = EvalSExp(false, expr, &localEnv);
+
+        return result;
+    }
+};
+
+shared_ptr<Node> EvalSExp(bool isGlobalLayer,
+                          const shared_ptr<Node>& node,
+                          unordered_map<string, shared_ptr<Node>>* env = &globalEnv) {
     // For quoted expressions using the shorthand: return the inner expression unchanged.
     if (auto quote = dynamic_pointer_cast<QuoteNode>(node))
         return quote->getExpression();
@@ -699,17 +686,19 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
     if (auto atom = dynamic_pointer_cast<AtomNode>(node)) {
         if (atom->getType() == TokenType::SYMBOL) {
             string sym = atom->getValue();
-            // If the symbol is bound in the environment, return its binding.
-            // If the symbol is bound in the built environment, return a placeholder.
-            // Otherwise, throw error.
+            // If the symbol is bound in the current environment, return its binding directly.
+            if (env->find(sym) != env->end())
+                return (*env)[sym];
+
+            // If not found in the local env, check the global environment.
             if (globalEnv.find(sym) != globalEnv.end())
                 return globalEnv[sym];
 
-            else if (builtins.find(sym) != builtins.end())
+            // For built-in functions, you might want to keep a placeholder if necessary.
+            if (builtins.find(sym) != builtins.end())
                 return make_shared<AtomNode>(TokenType::SYMBOL, "#<procedure " + sym + ">");
 
-            else
-                throw RunTimeException("ERROR (unbound symbol) : " + node->toString());
+            throw RunTimeException("ERROR (unbound symbol) : " + node->toString());
         }
         return node;
     }
@@ -726,8 +715,15 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
         const auto& opNode = EvalSExp(false, elems[0]);
         auto atomOp = dynamic_pointer_cast<AtomNode>(opNode);
 
-        if (!atomOp)
+        if (!atomOp) {
+            if (auto proc = dynamic_pointer_cast<Procedure>(opNode)) {
+                vector<shared_ptr<Node>> args;
+                for (size_t i = 1; i < elems.size(); i++)
+                    args.push_back(EvalSExp(false, elems[i]));
+                return proc->Exec(args);
+            }
             throw RunTimeException("ERROR (attempt to apply non-function) : " + Printer::print(opNode));
+        }
 
         if (atomOp->getType() != TokenType::SYMBOL)
             throw RunTimeException("ERROR (attempt to apply non-function) : " + atomOp->getValue());
@@ -748,20 +744,18 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             if (elems.size() != 3)
                 throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
 
-            auto symNode = elems[1];
-
+            const auto& symNode = elems[1];
             if (auto atomSym = dynamic_pointer_cast<AtomNode>(symNode)) {
                 if (atomSym->getType() != TokenType::SYMBOL)
                     throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
                 string symName = atomSym->getValue();
                 if (builtins.find(symName) != builtins.end())
                     throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
-                globalEnv[symName] = EvalSExp(false, elems[2]);
+                (*env)[symName] = EvalSExp(false, elems[2]);
                 return make_shared<AtomNode>(TokenType::SYMBOL, symName + " defined");
             }
 
-            else
-                throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
+            throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
         }
         else if (op == "clean-environment") {
             if (!isGlobalLayer)
@@ -771,14 +765,14 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             globalEnv.clear();
             return make_shared<AtomNode>(TokenType::SYMBOL, "environment cleaned");
         }
-        else if (op == "exit") {
+        if (op == "exit") {
             if (!isGlobalLayer)
                 throw RunTimeException("ERROR (level of EXIT)");
             if (elems.size() != 1)
                 throw RunTimeException("ERROR (incorrect number of arguments) : exit");
             throw ExitException();
         }
-        else if (op == "if") {
+        if (op == "if") {
             if (elems.size() != 3 && elems.size() != 4)
                 throw RunTimeException("ERROR (incorrect number of arguments) : " + op);
             auto condVal = EvalSExp(false, elems[1]);
@@ -789,34 +783,30 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                 condTrue = true;
             if (condTrue)
                 return EvalSExp(false, elems[2]);
-            else {
-                if (elems.size() == 4)
-                    return EvalSExp(false, elems[3]);
-                else
-                    throw RunTimeException("ERROR (no return value) : " + Printer::print(node));
-            }
+            if (elems.size() == 4)
+                return EvalSExp(false, elems[3]);
+            throw RunTimeException("ERROR (no return value) : " + Printer::print(node));
         }
-        else if (op == "cond") {
+        if (op == "cond") {
             if (elems.size() < 2)
                 throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
 
             // Pre-check: validate every clause is a proper list and non-empty
             for (size_t i = 1; i < elems.size(); i++) {
-                auto clause = elems[i];
+                const auto& clause = elems[i];
                 if (!isProperList(clause))
                     throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
 
                 vector<shared_ptr<Node>> clauseElems = unrollList(clause);
                 if (clauseElems.empty())
                     throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
-
-                else if (clauseElems.size() < 2)
+                if (clauseElems.size() < 2)
                     throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
             }
 
             // Iterate over each clause
             for (size_t i = 1; i < elems.size(); i++) {
-                auto clause = elems[i];
+                const auto& clause = elems[i];
                 // Each clause must be a proper list.
                 if (!isProperList(clause))
                     throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
@@ -859,14 +849,13 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                         }
                         return result;
                     }
-                    else
-                        throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
+                    throw RunTimeException("ERROR (COND format) : " + Printer::print(node));
                 }
             }
             // If no clause yields a value, signal an error.
             throw RunTimeException("ERROR (no return value) : " + Printer::print(node));
         }
-        else if (op == "begin") {
+        if (op == "begin") {
             if (elems.size() < 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : begin");
             shared_ptr<Node> res;
@@ -874,12 +863,12 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                 res = EvalSExp(false, elems[i]);
             return res;
         }
-        else if (op == "quote") {
+        if (op == "quote") {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : quote");
             return elems[1];
         }
-        else if (op == "cons") {
+        if (op == "cons") {
             if (elems.size() != 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : cons");
 
@@ -890,7 +879,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             return make_shared<DotNode>(args[0], args[1]);
         }
-        else if (op == "car") {
+        if (op == "car") {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : car");
 
@@ -903,7 +892,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             return pairNode->getLeft();
         }
-        else if (op == "cdr") {
+        if (op == "cdr") {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : cdr");
 
@@ -916,8 +905,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             return pairNode->getRight();
         }
-
-        else if (op == "list") {
+        if (op == "list") {
             shared_ptr<Node> list = make_shared<AtomNode>(TokenType::NIL, "nil");
 
             // Evaluate operands for the remaining built-in functions.
@@ -930,8 +918,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             return list;
         }
-
-        else if (op == "+") {
+        if (op == "+") {
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : +");
 
@@ -942,7 +929,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             double sum = 0.0;
             bool forceFloat = false;
-            for (auto arg : args) {
+            for (const auto& arg : args) {
                 double n = getNumber(op, arg);
                 sum += n;
                 if (auto atom = dynamic_pointer_cast<AtomNode>(arg))
@@ -952,10 +939,9 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             if (forceFloat)
                 return make_shared<AtomNode>(TokenType::FLOAT, to_string(sum));
-            else
-                return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(sum)));
+            return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(sum)));
         }
-        else if (op == "-") {
+        if (op == "-") {
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : -");
 
@@ -980,10 +966,9 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             if (forceFloat)
                 return make_shared<AtomNode>(TokenType::FLOAT, to_string(result));
-            else
-                return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(result)));
+            return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(result)));
         }
-        else if (op == "*") {
+        if (op == "*") {
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : *");
 
@@ -994,7 +979,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             double product = 1.0;
             bool forceFloat = false;
-            for (auto arg : args) {
+            for (const auto& arg : args) {
                 double n = getNumber(op, arg);
                 product *= n;
                 if (auto atom = dynamic_pointer_cast<AtomNode>(arg))
@@ -1004,10 +989,9 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             if (forceFloat)
                 return make_shared<AtomNode>(TokenType::FLOAT, to_string(product));
-            else
-                return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(product)));
+            return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(product)));
         }
-        else if (op == "/") {
+        if (op == "/") {
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : /");
 
@@ -1034,11 +1018,9 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             if (forceFloat)
                 return make_shared<AtomNode>(TokenType::FLOAT, to_string(result));
-            else
-                return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(result)));
+            return make_shared<AtomNode>(TokenType::INT, to_string(static_cast<int>(result)));
         }
-
-        else if (op == ">") {
+        if (op == ">") {
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : >");
 
@@ -1049,7 +1031,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             double prev = getNumber(op, args[0]);
             for (size_t i = 1; i < args.size(); i++)
-                double curr = getNumber(op, args[i]);
+                getNumber(op, args[i]);
 
             for (size_t i = 1; i < args.size(); i++) {
                 double curr = getNumber(op, args[i]);
@@ -1059,7 +1041,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             }
             return make_shared<AtomNode>(TokenType::T, "#t");
         }
-        else if (op == ">=") {
+        if (op == ">=") {
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : >=");
 
@@ -1070,7 +1052,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             double prev = getNumber(op, args[0]);
             for (size_t i = 1; i < args.size(); i++)
-                double curr = getNumber(op, args[i]);
+                getNumber(op, args[i]);
 
             for (size_t i = 1; i < args.size(); i++) {
                 double curr = getNumber(op, args[i]);
@@ -1080,7 +1062,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             }
             return make_shared<AtomNode>(TokenType::T, "#t");
         }
-        else if (op == "<") {
+        if (op == "<") {
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : <");
 
@@ -1091,7 +1073,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             double prev = getNumber(op, args[0]);
             for (size_t i = 1; i < args.size(); i++)
-                double curr = getNumber(op, args[i]);
+                getNumber(op, args[i]);
 
             for (size_t i = 1; i < args.size(); i++) {
                 double curr = getNumber(op, args[i]);
@@ -1101,7 +1083,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             }
             return make_shared<AtomNode>(TokenType::T, "#t");
         }
-        else if (op == "<=") {
+        if (op == "<=") {
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : <=");
 
@@ -1112,7 +1094,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             double prev = getNumber(op, args[0]);
             for (size_t i = 1; i < args.size(); i++)
-                double curr = getNumber(op, args[i]);
+                getNumber(op, args[i]);
 
             for (size_t i = 1; i < args.size(); i++) {
                 double curr = getNumber(op, args[i]);
@@ -1122,7 +1104,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             }
             return make_shared<AtomNode>(TokenType::T, "#t");
         }
-        else if (op == "=") {
+        if (op == "=") {
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : =");
 
@@ -1133,7 +1115,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             double first = getNumber(op, args[0]);
             for (size_t i = 1; i < args.size(); i++)
-                double curr = getNumber(op, args[i]);
+                getNumber(op, args[i]);
 
             for (size_t i = 1; i < args.size(); i++) {
                 double curr = getNumber(op, args[i]);
@@ -1142,8 +1124,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             }
             return make_shared<AtomNode>(TokenType::T, "#t");
         }
-
-        else if (op == "not") {
+        if (op == "not") {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : not");
             auto testVal = EvalSExp(false, elems[1]);
@@ -1153,9 +1134,9 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             else
                 truth = true;
             return truth ? make_shared<AtomNode>(TokenType::NIL, "nil")
-                         : make_shared<AtomNode>(TokenType::T, "#t");
+                       : make_shared<AtomNode>(TokenType::T, "#t");
         }
-        else if (op == "and") {
+        if (op == "and") {
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : and");
             shared_ptr<Node> lastEvaluated;
@@ -1171,7 +1152,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             }
             return lastEvaluated;
         }
-        else if (op == "or") {
+        if (op == "or") {
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : or");
             for (size_t i = 1; i < elems.size(); i++) {
@@ -1186,8 +1167,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             }
             return make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-
-        else if (op == "string-append") {
+        if (op == "string-append") {
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : string-append");
 
@@ -1212,7 +1192,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             string finalStr = "\"" + result + "\"";
             return make_shared<AtomNode>(TokenType::STRING, finalStr);
         }
-        else if (op == "string>?") {
+        if (op == "string>?") {
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : string>?");
 
@@ -1236,15 +1216,15 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             }
             bool resultBool = true;
             for (size_t i = 0; i < strs.size() - 1; i++) {
-                if (!(strs[i] > strs[i+1])) {
+                if (strs[i] <= strs[i+1]) {
                     resultBool = false;
                     break;
                 }
             }
             return resultBool ? make_shared<AtomNode>(TokenType::T, "#t")
-                              : make_shared<AtomNode>(TokenType::NIL, "nil");
+                       : make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-        else if (op == "string<?") {
+        if (op == "string<?") {
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : string<?");
 
@@ -1268,15 +1248,15 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             }
             bool resultBool = true;
             for (size_t i = 0; i < strs.size() - 1; i++) {
-                if (!(strs[i] < strs[i+1])) {
+                if (strs[i] >= strs[i+1]) {
                     resultBool = false;
                     break;
                 }
             }
             return resultBool ? make_shared<AtomNode>(TokenType::T, "#t")
-                              : make_shared<AtomNode>(TokenType::NIL, "nil");
+                       : make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-        else if (op == "string=?") {
+        if (op == "string=?") {
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : string=?");
 
@@ -1306,10 +1286,9 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                 }
             }
             return allEqual ? make_shared<AtomNode>(TokenType::T, "#t")
-                            : make_shared<AtomNode>(TokenType::NIL, "nil");
+                       : make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-
-        else if (op == "eqv?") {
+        if (op == "eqv?") {
             if (elems.size() != 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : eqv?");
 
@@ -1327,12 +1306,11 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                     return make_shared<AtomNode>(TokenType::NIL, "nil");
                 if (atom1->getType() == atom2->getType() && atom1->getValue() == atom2->getValue())
                     return make_shared<AtomNode>(TokenType::T, "#t");
-                else
-                    return make_shared<AtomNode>(TokenType::NIL, "nil");
+                return make_shared<AtomNode>(TokenType::NIL, "nil");
             }
             return make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-        else if (op == "equal?") {
+        if (op == "equal?") {
             if (elems.size() != 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : equal?");
 
@@ -1352,20 +1330,17 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                     if (s2.size() >= 2 && s2.front() == '"' && s2.back() == '"')
                         s2 = s2.substr(1, s2.size() - 2);
                     return (s1 == s2) ? make_shared<AtomNode>(TokenType::T, "#t")
-                                      : make_shared<AtomNode>(TokenType::NIL, "nil");
+                               : make_shared<AtomNode>(TokenType::NIL, "nil");
                 }
-                else if (atom1->getType() == atom2->getType() && atom1->getValue() == atom2->getValue())
+                if (atom1->getType() == atom2->getType() && atom1->getValue() == atom2->getValue())
                     return make_shared<AtomNode>(TokenType::T, "#t");
-                else
-                    return make_shared<AtomNode>(TokenType::NIL, "nil");
+                return make_shared<AtomNode>(TokenType::NIL, "nil");
             }
             if (structuralEqual(args[0], args[1]))
                 return make_shared<AtomNode>(TokenType::T, "#t");
-            else
-                return make_shared<AtomNode>(TokenType::NIL, "nil");
+            return make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-
-        else if (op == "atom?") {
+        if (op == "atom?") {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : atom?");
 
@@ -1375,10 +1350,10 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                 args.push_back(EvalSExp(false, elems[i]));
 
             return dynamic_pointer_cast<DotNode>(args[0])
-                   ? make_shared<AtomNode>(TokenType::NIL, "nil")
-                   : make_shared<AtomNode>(TokenType::T, "#t");
+                       ? make_shared<AtomNode>(TokenType::NIL, "nil")
+                       : make_shared<AtomNode>(TokenType::T, "#t");
         }
-        else if (op == "pair?") {
+        if (op == "pair?") {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : pair?");
 
@@ -1388,10 +1363,10 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
                 args.push_back(EvalSExp(false, elems[i]));
 
             return dynamic_pointer_cast<DotNode>(args[0])
-                   ? make_shared<AtomNode>(TokenType::T, "#t")
-                   : make_shared<AtomNode>(TokenType::NIL, "nil");
+                       ? make_shared<AtomNode>(TokenType::T, "#t")
+                       : make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-        else if (op == "list?") {
+        if (op == "list?") {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : list?");
 
@@ -1406,9 +1381,9 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             else
                 proper = isProperList(args[0]);
             return proper ? make_shared<AtomNode>(TokenType::T, "#t")
-                          : make_shared<AtomNode>(TokenType::NIL, "nil");
+                       : make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-        else if (op == "null?") {
+        if (op == "null?") {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : null?");
 
@@ -1419,12 +1394,11 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
                 return (atom->getValue() == "nil")
-                       ? make_shared<AtomNode>(TokenType::T, "#t")
-                       : make_shared<AtomNode>(TokenType::NIL, "nil");
-            else
-                return make_shared<AtomNode>(TokenType::NIL, "nil");
+                           ? make_shared<AtomNode>(TokenType::T, "#t")
+                           : make_shared<AtomNode>(TokenType::NIL, "nil");
+            return make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-        else if (op == "integer?") {
+        if (op == "integer?") {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : integer?");
 
@@ -1435,12 +1409,11 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
                 return (atom->getType() == TokenType::INT)
-                       ? make_shared<AtomNode>(TokenType::T, "#t")
-                       : make_shared<AtomNode>(TokenType::NIL, "nil");
-            else
-                return make_shared<AtomNode>(TokenType::NIL, "nil");
+                           ? make_shared<AtomNode>(TokenType::T, "#t")
+                           : make_shared<AtomNode>(TokenType::NIL, "nil");
+            return make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-        else if (op == "real?") {
+        if (op == "real?") {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : real?");
 
@@ -1451,12 +1424,11 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
                 return ((atom->getType() == TokenType::INT || atom->getType() == TokenType::FLOAT)
-                        ? make_shared<AtomNode>(TokenType::T, "#t")
-                        : make_shared<AtomNode>(TokenType::NIL, "nil"));
-            else
-                return make_shared<AtomNode>(TokenType::NIL, "nil");
+                            ? make_shared<AtomNode>(TokenType::T, "#t")
+                            : make_shared<AtomNode>(TokenType::NIL, "nil"));
+            return make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-        else if (op == "number?") {
+        if (op == "number?") {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : number?");
 
@@ -1467,12 +1439,11 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
                 return ((atom->getType() == TokenType::INT || atom->getType() == TokenType::FLOAT)
-                        ? make_shared<AtomNode>(TokenType::T, "#t")
-                        : make_shared<AtomNode>(TokenType::NIL, "nil"));
-            else
-                return make_shared<AtomNode>(TokenType::NIL, "nil");
+                            ? make_shared<AtomNode>(TokenType::T, "#t")
+                            : make_shared<AtomNode>(TokenType::NIL, "nil"));
+            return make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-        else if (op == "string?") {
+        if (op == "string?") {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : string?");
 
@@ -1483,12 +1454,11 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
                 return (atom->getType() == TokenType::STRING
-                        ? make_shared<AtomNode>(TokenType::T, "#t")
-                        : make_shared<AtomNode>(TokenType::NIL, "nil"));
-            else
-                return make_shared<AtomNode>(TokenType::NIL, "nil");
+                            ? make_shared<AtomNode>(TokenType::T, "#t")
+                            : make_shared<AtomNode>(TokenType::NIL, "nil"));
+            return make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-        else if (op == "boolean?") {
+        if (op == "boolean?") {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : boolean?");
 
@@ -1500,13 +1470,11 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
             if (auto atom = dynamic_pointer_cast<AtomNode>(args[0])) {
                 if (atom->getType() == TokenType::T || atom->getType() == TokenType::NIL)
                     return make_shared<AtomNode>(TokenType::T, "#t");
-                else
-                    return make_shared<AtomNode>(TokenType::NIL, "nil");
-            }
-            else
                 return make_shared<AtomNode>(TokenType::NIL, "nil");
+            }
+            return make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-        else if (op == "symbol?") {
+        if (op == "symbol?") {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : symbol?");
 
@@ -1517,14 +1485,11 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node) {
 
             if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
                 return (atom->getType() == TokenType::SYMBOL
-                        ? make_shared<AtomNode>(TokenType::T, "#t")
-                        : make_shared<AtomNode>(TokenType::NIL, "nil"));
-            else
-                return make_shared<AtomNode>(TokenType::NIL, "nil");
+                            ? make_shared<AtomNode>(TokenType::T, "#t")
+                            : make_shared<AtomNode>(TokenType::NIL, "nil"));
+            return make_shared<AtomNode>(TokenType::NIL, "nil");
         }
-
-        else
-            throw RunTimeException("ERROR (unbound symbol) : " + op);
+        throw RunTimeException("ERROR (unbound symbol) : " + op);
     }
 
     throw RunTimeException("ERROR (unknown expression) : " + node->toString());

@@ -39,7 +39,7 @@
 				{
 					"directoryIndex" : 0,
 					"id" : "OurScheme::@6890427a1f51a3e7e1df",
-					"jsonFile" : "target-OurScheme-Debug-ddc95c102fa61e6ac62e.json",
+					"jsonFile" : "target-OurScheme-Debug-1145262fdba4a4f8958b.json",
 					"name" : "OurScheme",
 					"projectIndex" : 0
 				}
@@ -49,8 +49,8 @@
 	"kind" : "codemodel",
 	"paths" : 
 	{
-		"build" : "D:/Clouds Services/OneDrive/Codes/OurScheme/cmake-build-debug",
-		"source" : "D:/Clouds Services/OneDrive/Codes/OurScheme"
+		"build" : "D:/OneDrive/Codes/OurScheme/cmake-build-debug",
+		"source" : "D:/OneDrive/Codes/OurScheme"
 	},
 	"version" : 
 	{
