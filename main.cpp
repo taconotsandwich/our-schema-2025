@@ -543,8 +543,8 @@ private:
 unordered_map<string, shared_ptr<Node>> globalEnv;
 // Protected built-in names.
 unordered_set<string> builtins = {
-        "cons", "car", "cdr", "list", "quote", "define", "if", "cond", "begin",
-        "+", "-", "*", "/", "clean-environment", "exit",
+        "cons", "car", "cdr", "list", "quote", "define", "if", "cond", "begin", "lambda",
+        "+", "-", "*", "/", "clean-environment", "exit", "let",
         "atom?", "pair?", "list?", "null?", "integer?", "real?", "number?", "string?",
         "boolean?", "symbol?",
         "not", "and", "or",
@@ -638,39 +638,73 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node,
 class Procedure final : public Node {
 public:
     vector<string> params;                   // formal parameter names
-    vector<shared_ptr<Node>> body;           // one or more S-expressions
-    // The closure environment (we simply use a pointer to an environment mapping)
-    // In this minimal design we define an environment as an unordered_map.
-    unordered_map<string, shared_ptr<Node>> env;
+    vector<shared_ptr<Node>> body;           // one or more S-expressions (AST nodes)
+    // The closure environment (captures the lexical scope at definition time)
+    unordered_map<string, shared_ptr<Node>> captured_env;
+    string name; // Optional: store the name if defined using (define (name params) ...)
 
-    Procedure(const vector<string>& params,
-              const vector<shared_ptr<Node>>& body,
+    // Constructor for lambda and direct define of lambda
+    Procedure(const vector<string>& p,
+              const vector<shared_ptr<Node>>& b,
               const unordered_map<string, shared_ptr<Node>>& env)
-            : params(params), body(body), env(env) {}
+            : params(p), body(b), captured_env(env), name("lambda") {}
+
+    // Constructor for named function defined with sugar syntax
+    Procedure(const string& n,
+              const vector<string>& p,
+              const vector<shared_ptr<Node>>& b,
+              const unordered_map<string, shared_ptr<Node>>& env)
+            : name(n), params(p), body(b), captured_env(env) {}
+
 
     // When printed, show an indicative string.
     string toString(int indent = 0) const override {
-        return "#<procedure lambda>";
+        if (name == "lambda") {
+            return "#<procedure lambda>";
+        } else {
+            return "#<procedure " + name + ">";
+        }
     }
 
     // Exec function to execute the procedure using evaluated arguments.
     // It creates a new local environment extending the closure's environment.
     shared_ptr<Node> Exec(const vector<shared_ptr<Node>>& args) {
-        if (args.size() != params.size())
-            throw RunTimeException("ERROR (incorrect number of arguments) : lambda expression");
+        if (args.size() != params.size()) {
+            // Use the stored name in the error message if available
+            throw RunTimeException("ERROR (incorrect number of arguments) : " + (name == "lambda" ? "lambda expression" : name));
+        }
 
-        // Create a new local environment by copying the closure environment.
-        unordered_map<string, shared_ptr<Node>> localEnv = env;
-        // Bind each formal parameter to its corresponding argument.
+        // Create a new local environment by copying the *captured* environment.
+        unordered_map<string, shared_ptr<Node>> localEnv = captured_env;
+
+        // Bind each formal parameter to its corresponding *evaluated* argument.
         for (size_t i = 0; i < args.size(); i++) {
+            // This binding shadows any variable with the same name in the captured_env
             localEnv[params[i]] = args[i];
         }
 
-        // Evaluate each expression in the procedure body sequentially.
-        shared_ptr<Node> result;
-        for (auto & expr : body)
-            result = EvalSExp(false, expr, &localEnv);
+//        // Inside Procedure::Exec, after the binding loop:
+//        cout << "DEBUG: localEnv for " << name << " execution:" << endl;
+//        for(const auto& pair : localEnv) {
+//            cout << "  " << pair.first << " -> " << Printer::print(pair.second) << endl;
+//        }
 
+        // Evaluate each expression in the procedure body sequentially within the localEnv.
+        shared_ptr<Node> result; // Stores the result of the last expression
+        for (const auto& expr : body) {
+            // Evaluate using the newly created local environment
+            // Pass false for isGlobalLayer as this is inside a function execution
+            result = EvalSExp(false, expr, &localEnv);
+        }
+
+        // The result of the last expression in the body is the return value.
+        // Need error handling if the body was empty (should be caught by lambda/define format checks)
+        // or if the last expression didn't return a value (handled by EvalSExp called above).
+        if (!result) {
+            // This case might be tricky to hit if EvalSExp correctly throws errors
+            // for missing return values internally. But as a safeguard:
+            throw RunTimeException("ERROR (no return value) : from body of " + (name == "lambda" ? "lambda expression" : name));
+        }
         return result;
     }
 };
@@ -678,6 +712,14 @@ public:
 shared_ptr<Node> EvalSExp(bool isGlobalLayer,
                           const shared_ptr<Node>& node,
                           unordered_map<string, shared_ptr<Node>>* env = &globalEnv) {
+//    cout << "DEBUG: EvalSExp called for node: " << typeid(*node).name()
+//         << " with env address: " << env << endl;
+//    if (auto atom = dynamic_pointer_cast<AtomNode>(node)) {
+//        if (atom->getType() == TokenType::SYMBOL) {
+//            cout << "  Symbol: " << atom->getValue() << endl;
+//        }
+//    }
+
     // For quoted expressions using the shorthand: return the inner expression unchanged.
     if (auto quote = dynamic_pointer_cast<QuoteNode>(node))
         return quote->getExpression();
@@ -712,14 +754,14 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             throw RunTimeException("ERROR (attempt to apply non-function) : " + node->toString());
 
         // Evaluate the operator
-        const auto& opNode = EvalSExp(false, elems[0]);
+        const auto& opNode = EvalSExp(false, elems[0], env);
         auto atomOp = dynamic_pointer_cast<AtomNode>(opNode);
 
         if (!atomOp) {
             if (auto proc = dynamic_pointer_cast<Procedure>(opNode)) {
                 vector<shared_ptr<Node>> args;
                 for (size_t i = 1; i < elems.size(); i++)
-                    args.push_back(EvalSExp(false, elems[i]));
+                    args.push_back(EvalSExp(false, elems[i], env));
                 return proc->Exec(args);
             }
             throw RunTimeException("ERROR (attempt to apply non-function) : " + Printer::print(opNode));
@@ -737,27 +779,206 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             op = op.substr(prefix.size(), op.size() - prefix.size() - suffix.size());
         }
 
-        if (op == "define") {
-            if (!isGlobalLayer)
-                throw RunTimeException("ERROR (level of DEFINE)");
+        if (op == "lambda") {
+            // Syntax: (lambda (param1 ...) body1 ...)
+            if (elems.size() < 3) // Must have params list and at least one body expr
+                throw RunTimeException("ERROR (lambda format) : " + Printer::print(node));
 
-            if (elems.size() != 3)
-                throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
+            const auto& paramsNode = elems[1];
+            vector<string> paramNames;
 
-            const auto& symNode = elems[1];
-            if (auto atomSym = dynamic_pointer_cast<AtomNode>(symNode)) {
-                if (atomSym->getType() != TokenType::SYMBOL)
-                    throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
-                string symName = atomSym->getValue();
-                if (builtins.find(symName) != builtins.end())
-                    throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
-                (*env)[symName] = EvalSExp(false, elems[2]);
-                return make_shared<AtomNode>(TokenType::SYMBOL, symName + " defined");
+            // Validate parameters list: must be a proper list of symbols
+            if (!isProperList(paramsNode))
+                throw RunTimeException("ERROR (lambda format) : parameters must be a proper list");
+
+            vector<shared_ptr<Node>> paramListElems;
+            try {
+                paramListElems = unrollList(paramsNode);
+            } catch (...) { // Catch potential errors from unrolling malformed list
+                throw RunTimeException("ERROR (lambda format) : invalid parameter list structure");
             }
 
-            throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
+            for (const auto& param : paramListElems) {
+                auto paramAtom = dynamic_pointer_cast<AtomNode>(param);
+                if (!paramAtom || paramAtom->getType() != TokenType::SYMBOL) {
+                    throw RunTimeException("ERROR (lambda format) : parameters must be symbols");
+                }
+                paramNames.push_back(paramAtom->getValue());
+            }
+
+            // Collect body expressions (all elements from index 2 onwards)
+            vector<shared_ptr<Node>> bodyExprs;
+            for (size_t i = 2; i < elems.size(); ++i) {
+                bodyExprs.push_back(elems[i]);
+            }
+
+            // Create the Procedure object (closure)
+            // Capture the *current* environment 'env'
+            return make_shared<Procedure>(paramNames, bodyExprs, *env);
         }
-        else if (op == "clean-environment") {
+        if (op == "define") {
+            if (!isGlobalLayer) // Define only allowed at top level
+                throw RunTimeException("ERROR (level of DEFINE)");
+
+            // --- Form 1: (define symbol value) ---
+            if (elems.size() == 3 && dynamic_pointer_cast<AtomNode>(elems[1]) && dynamic_pointer_cast<AtomNode>(elems[1])->getType() == TokenType::SYMBOL) {
+                auto symAtom = dynamic_pointer_cast<AtomNode>(elems[1]);
+                string symName = symAtom->getValue();
+
+                if (builtins.count(symName)) // Cannot redefine builtins
+                    throw RunTimeException("ERROR (DEFINE format) : cannot redefine builtin " + symName);
+
+                // Evaluate the value expression in the current environment
+                shared_ptr<Node> value = EvalSExp(false, elems[2], env); // Evaluate value in current env
+
+                // Bind the symbol to the evaluated value in the *global* environment
+                globalEnv[symName] = value; // Use globalEnv directly
+
+                // Decide whether to print output based on verbose flag (Add verbose logic if needed)
+                // For now, always return the defined message
+                return make_shared<AtomNode>(TokenType::SYMBOL, symName + " defined");
+
+                // --- Form 2: (define (func param...) body...) ---
+            }
+            else if (elems.size() >= 3 && dynamic_pointer_cast<DotNode>(elems[1])) { // function definition shorthand
+                vector<shared_ptr<Node>> headerElems;
+                try {
+                    headerElems = unrollList(elems[1]); // Unroll the (func param...) part
+                } catch (...) {
+                    throw RunTimeException("ERROR (DEFINE format) : invalid function header structure");
+                }
+
+
+                if (headerElems.empty())
+                    throw RunTimeException("ERROR (DEFINE format) : function header cannot be empty");
+
+                auto funcNameAtom = dynamic_pointer_cast<AtomNode>(headerElems[0]);
+                if (!funcNameAtom || funcNameAtom->getType() != TokenType::SYMBOL)
+                    throw RunTimeException("ERROR (DEFINE format) : function name must be a symbol");
+
+                string funcName = funcNameAtom->getValue();
+                if (builtins.count(funcName))
+                    throw RunTimeException("ERROR (DEFINE format) : cannot redefine builtin " + funcName);
+
+                // Extract parameter names (symbols)
+                vector<string> paramNames;
+                for (size_t i = 1; i < headerElems.size(); ++i) {
+                    auto paramAtom = dynamic_pointer_cast<AtomNode>(headerElems[i]);
+                    if (!paramAtom || paramAtom->getType() != TokenType::SYMBOL) {
+                        throw RunTimeException("ERROR (DEFINE format) : function parameters must be symbols");
+                    }
+                    paramNames.push_back(paramAtom->getValue());
+                }
+
+                // Collect body expressions
+                if (elems.size() < 3) // Need at least one body expression
+                    throw RunTimeException("ERROR (DEFINE format) : function requires a body");
+
+                vector<shared_ptr<Node>> bodyExprs;
+                for (size_t i = 2; i < elems.size(); ++i) {
+                    bodyExprs.push_back(elems[i]);
+                }
+
+                // Create the Procedure (closure) capturing the *current* environment 'env'
+                // Store the function name in the Procedure object
+                auto procedure = make_shared<Procedure>(funcName, paramNames, bodyExprs, *env);
+
+                // Bind the function name in the *global* environment
+                globalEnv[funcName] = procedure; // Use globalEnv directly
+
+                // Decide whether to print output based on verbose flag (Add verbose logic if needed)
+                // For now, always return the defined message
+                return make_shared<AtomNode>(TokenType::SYMBOL, funcName + " defined");
+
+            }
+            else {
+                // Neither format matched
+                throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
+            }
+        }
+        if (op == "let") {
+            // Syntax: (let ((var1 val1) ...) body1 ...)
+            if (elems.size() < 3) { // Must have bindings list and at least one body expr
+                throw RunTimeException("ERROR (let format) : needs bindings list and body - " + Printer::print(node));
+            }
+
+            const auto& bindingsNode = elems[1];
+            if (!isProperList(bindingsNode)) {
+                throw RunTimeException("ERROR (let format) : bindings must be a proper list - " + Printer::print(bindingsNode));
+            }
+
+            vector<shared_ptr<Node>> bindingPairsList;
+            bindingPairsList = unrollList(bindingsNode);
+
+            // Create local environment based on *current* environment 'env'
+            unordered_map<string, shared_ptr<Node>> localEnv = *env;
+
+            // Evaluate values and create bindings *sequentially* but values evaluated in *outer* scope
+            unordered_map<string, shared_ptr<Node>> bindings_to_add; // Store evaluated bindings temporarily
+
+            for (const auto& bindingPairNode : bindingPairsList) {
+                if (!isProperList(bindingPairNode)) {
+                    throw RunTimeException("ERROR (let format) : binding must be a pair - " + Printer::print(bindingPairNode));
+                }
+
+                vector<shared_ptr<Node>> pairElems;
+                pairElems = unrollList(bindingPairNode);
+
+
+                if (pairElems.size() != 2) {
+                    throw RunTimeException("ERROR (let format) : binding pair must have 2 elements - " + Printer::print(bindingPairNode));
+                }
+
+                auto symbolNode = dynamic_pointer_cast<AtomNode>(pairElems[0]);
+                if (!symbolNode || symbolNode->getType() != TokenType::SYMBOL) {
+                    throw RunTimeException("ERROR (let format) : binding variable must be a symbol - " + Printer::print(pairElems[0]));
+                }
+                string symbolName = symbolNode->getValue();
+
+                // Check for duplicate variable names within the same let bindings list
+                if (bindings_to_add.count(symbolName)) {
+                    throw RunTimeException("ERROR (let format) : duplicate variable in let bindings - " + symbolName);
+                }
+
+                const auto& valueExprNode = pairElems[1];
+
+                // Evaluate value expression in the *original* environment (`env`)
+                shared_ptr<Node> valueResult = EvalSExp(false, valueExprNode, env); // Use original 'env'
+
+                // Part II.d: Check for no return value from valueExpr evaluation
+                // if (!valueResult) { // If EvalSExp returns nullptr
+                //    throw RunTimeException("ERROR (no return value) : " + Printer::simplePrint(valueExprNode));
+                // }
+
+                // Store the result temporarily
+                bindings_to_add[symbolName] = valueResult;
+            }
+
+            // Now add all evaluated bindings to the local environment
+            // This ensures bindings within the same 'let' are not visible to each other during value evaluation.
+            for(const auto& pair : bindings_to_add) {
+                localEnv[pair.first] = pair.second;
+            }
+
+
+            // Evaluate body expressions in the *new local* environment
+            shared_ptr<Node> bodyResult = nullptr; // Result of the last body expression
+            if (elems.size() < 3) { // Should be caught earlier, safety check
+                throw RunTimeException("ERROR (let format) : missing body for let");
+            }
+
+            for (size_t i = 2; i < elems.size(); ++i) {
+                // Pass 'false' for isGlobalLayer. Use the 'localEnv'.
+                bodyResult = EvalSExp(false, elems[i], &localEnv);
+                // Handle potential "no return value" from body evaluation based on Part II rules?
+                // If the *last* expression yields no value, 'bodyResult' might be nullptr (if EvalSExp returns that).
+                // The caller of this 'let' evaluation (or main loop) is responsible for the error if needed.
+            }
+
+            // Return the result of the last body expression
+            return bodyResult;
+        }
+        if (op == "clean-environment") {
             if (!isGlobalLayer)
                 throw RunTimeException("ERROR (level of CLEAN-ENVIRONMENT)");
             if (elems.size() != 1)
@@ -775,16 +996,16 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
         if (op == "if") {
             if (elems.size() != 3 && elems.size() != 4)
                 throw RunTimeException("ERROR (incorrect number of arguments) : " + op);
-            auto condVal = EvalSExp(false, elems[1]);
+            auto condVal = EvalSExp(false, elems[1], env);
             bool condTrue;
             if (auto atomCond = dynamic_pointer_cast<AtomNode>(condVal))
                 condTrue = (atomCond->getValue() != "nil");
             else
                 condTrue = true;
             if (condTrue)
-                return EvalSExp(false, elems[2]);
+                return EvalSExp(false, elems[2], env);
             if (elems.size() == 4)
-                return EvalSExp(false, elems[3]);
+                return EvalSExp(false, elems[3], env);
             throw RunTimeException("ERROR (no return value) : " + Printer::print(node));
         }
         if (op == "cond") {
@@ -824,7 +1045,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
                         clauseTrue = true;
                     }
                     else {
-                        testResult = EvalSExp(false, clauseElems[0]);
+                        testResult = EvalSExp(false, clauseElems[0], env);
                         // Consider the test true if its evaluated result is not nil.
                         if (auto atomTest = dynamic_pointer_cast<AtomNode>(testResult))
                             clauseTrue = (atomTest->getValue() != "nil");
@@ -833,7 +1054,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
                     }
                 }
                 else {
-                    testResult = EvalSExp(false, clauseElems[0]);
+                    testResult = EvalSExp(false, clauseElems[0], env);
                     if (auto atomTest = dynamic_pointer_cast<AtomNode>(testResult))
                         clauseTrue = (atomTest->getValue() != "nil");
                     else
@@ -845,7 +1066,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
                     if (clauseElems.size() >= 2) {
                         shared_ptr<Node> result;
                         for (size_t j = 1; j < clauseElems.size(); j++) {
-                            result = EvalSExp(false, clauseElems[j]);
+                            result = EvalSExp(false, clauseElems[j], env);
                         }
                         return result;
                     }
@@ -860,7 +1081,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
                 throw RunTimeException("ERROR (incorrect number of arguments) : begin");
             shared_ptr<Node> res;
             for (size_t i = 1; i < elems.size(); i++)
-                res = EvalSExp(false, elems[i]);
+                res = EvalSExp(false, elems[i], env);
             return res;
         }
         if (op == "quote") {
@@ -875,7 +1096,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             return make_shared<DotNode>(args[0], args[1]);
         }
@@ -884,7 +1105,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
                 throw RunTimeException("ERROR (incorrect number of arguments) : car");
 
             // Evaluate the argument
-            shared_ptr<Node> argVal = EvalSExp(false, elems[1]);
+            shared_ptr<Node> argVal = EvalSExp(false, elems[1], env);
             // Check if the evaluated value is a pair (i.e. a DotNode)
             auto pairNode = dynamic_pointer_cast<DotNode>(argVal);
             if (!pairNode)
@@ -897,7 +1118,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
                 throw RunTimeException("ERROR (incorrect number of arguments) : cdr");
 
             // Evaluate the argument
-            shared_ptr<Node> argVal = EvalSExp(false, elems[1]);
+            shared_ptr<Node> argVal = EvalSExp(false, elems[1], env);
             // Check if the evaluated value is a pair (i.e. a DotNode)
             auto pairNode = dynamic_pointer_cast<DotNode>(argVal);
             if (!pairNode)
@@ -911,7 +1132,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             for (int i = args.size() - 1; i >= 0; i--)
                 list = make_shared<DotNode>(args[i], list);
@@ -925,7 +1146,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             double sum = 0.0;
             bool forceFloat = false;
@@ -948,7 +1169,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             double result = getNumber(op, args[0]);
             bool forceFloat = false;
@@ -975,7 +1196,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             double product = 1.0;
             bool forceFloat = false;
@@ -998,7 +1219,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             double result = getNumber(op, args[0]);
             bool forceFloat = false;
@@ -1027,7 +1248,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             double prev = getNumber(op, args[0]);
             for (size_t i = 1; i < args.size(); i++)
@@ -1048,7 +1269,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             double prev = getNumber(op, args[0]);
             for (size_t i = 1; i < args.size(); i++)
@@ -1069,7 +1290,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             double prev = getNumber(op, args[0]);
             for (size_t i = 1; i < args.size(); i++)
@@ -1090,7 +1311,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             double prev = getNumber(op, args[0]);
             for (size_t i = 1; i < args.size(); i++)
@@ -1111,7 +1332,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             double first = getNumber(op, args[0]);
             for (size_t i = 1; i < args.size(); i++)
@@ -1127,7 +1348,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
         if (op == "not") {
             if (elems.size() != 2)
                 throw RunTimeException("ERROR (incorrect number of arguments) : not");
-            auto testVal = EvalSExp(false, elems[1]);
+            auto testVal = EvalSExp(false, elems[1], env);
             bool truth;
             if (auto atom = dynamic_pointer_cast<AtomNode>(testVal))
                 truth = (atom->getValue() != "nil");
@@ -1141,7 +1362,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
                 throw RunTimeException("ERROR (incorrect number of arguments) : and");
             shared_ptr<Node> lastEvaluated;
             for (size_t i = 1; i < elems.size(); i++) {
-                lastEvaluated = EvalSExp(false, elems[i]);
+                lastEvaluated = EvalSExp(false, elems[i], env);
                 bool truth;
                 if (auto atom = dynamic_pointer_cast<AtomNode>(lastEvaluated))
                     truth = (atom->getValue() != "nil");
@@ -1156,7 +1377,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             if (elems.size() < 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : or");
             for (size_t i = 1; i < elems.size(); i++) {
-                auto val = EvalSExp(false, elems[i]);
+                auto val = EvalSExp(false, elems[i], env);
                 bool truth;
                 if (auto atom = dynamic_pointer_cast<AtomNode>(val))
                     truth = (atom->getValue() != "nil");
@@ -1174,7 +1395,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             string result;
             for (auto & arg : args) {
@@ -1199,7 +1420,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             vector<string> strs;
             for (auto & arg : args) {
@@ -1231,7 +1452,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             vector<string> strs;
             for (auto & arg : args) {
@@ -1263,7 +1484,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             vector<string> strs;
             for (auto & arg : args) {
@@ -1295,7 +1516,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             if (args[0] == args[1])
                 return make_shared<AtomNode>(TokenType::T, "#t");
@@ -1317,7 +1538,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             auto atom1 = dynamic_pointer_cast<AtomNode>(args[0]);
             auto atom2 = dynamic_pointer_cast<AtomNode>(args[1]);
@@ -1347,7 +1568,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             return dynamic_pointer_cast<DotNode>(args[0])
                        ? make_shared<AtomNode>(TokenType::NIL, "nil")
@@ -1360,7 +1581,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             return dynamic_pointer_cast<DotNode>(args[0])
                        ? make_shared<AtomNode>(TokenType::T, "#t")
@@ -1373,7 +1594,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             bool proper = false;
             if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
@@ -1390,7 +1611,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
                 return (atom->getValue() == "nil")
@@ -1405,7 +1626,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
                 return (atom->getType() == TokenType::INT)
@@ -1420,7 +1641,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
                 return ((atom->getType() == TokenType::INT || atom->getType() == TokenType::FLOAT)
@@ -1435,7 +1656,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
                 return ((atom->getType() == TokenType::INT || atom->getType() == TokenType::FLOAT)
@@ -1450,7 +1671,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
                 return (atom->getType() == TokenType::STRING
@@ -1465,7 +1686,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             if (auto atom = dynamic_pointer_cast<AtomNode>(args[0])) {
                 if (atom->getType() == TokenType::T || atom->getType() == TokenType::NIL)
@@ -1481,7 +1702,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             // Evaluate operands for the remaining built-in functions.
             vector<shared_ptr<Node>> args;
             for (size_t i = 1; i < elems.size(); i++)
-                args.push_back(EvalSExp(false, elems[i]));
+                args.push_back(EvalSExp(false, elems[i], env));
 
             if (auto atom = dynamic_pointer_cast<AtomNode>(args[0]))
                 return (atom->getType() == TokenType::SYMBOL
