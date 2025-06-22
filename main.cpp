@@ -13,6 +13,7 @@
 using namespace std;
 
 int g_testCase = 0;
+bool g_debugMode = false; // Set to true to enable debug prints, false to disable
 
 class ExitException : public std::exception {
 public:
@@ -575,25 +576,55 @@ vector<shared_ptr<Node>> unrollList(const shared_ptr<Node>& list) {
 // Extract a number from an evaluated node.
 double getNumber(const string& op, const shared_ptr<Node>& node) {
     auto atom = dynamic_pointer_cast<AtomNode>(node);
-    if (!atom || (atom->getType() != TokenType::INT && atom->getType() != TokenType::FLOAT))
-        throw CompileTimeException("ERROR (" + op + " with incorrect argument type) : " + Printer::print(node));
+    if (!atom) {
+        throw RunTimeException("ERROR (" + op + " with incorrect argument type) : " + Printer::print(node));
+    }
+    
+    if (atom->getType() == TokenType::STRING) {
+        string str = atom->getValue();
+        // Remove surrounding quotes if present
+        if (str.length() >= 2 && str.front() == '"' && str.back() == '"') {
+            str = str.substr(1, str.length() - 2);
+        }
+        try {
+            return stod(str);
+        } catch (...) {
+            return 0.0;  // If string can't be converted to number, return 0
+        }
+    }
+    
+    if (atom->getType() != TokenType::INT && atom->getType() != TokenType::FLOAT) {
+        throw RunTimeException("ERROR (" + op + " with incorrect argument type) : " + Printer::print(node));
+    }
     return stod(atom->getValue());
 }
 
 // Helper function to check if a node represents a proper list.
-// A proper list is either the empty list or a chain of DotNodes ending in an AtomNode with value "nil".
+// A proper list is either the empty list (nil atom)
+// or a chain of DotNodes ending in the empty list (nil atom).
 bool isProperList(const shared_ptr<Node>& node) {
     auto current = node;
     while (true) {
-        if (auto dot = dynamic_pointer_cast<DotNode>(current))
+        // Follow the cdr chain if it's a pair
+        if (auto dot = dynamic_pointer_cast<DotNode>(current)) {
             current = dot->getRight();
-
+        }
+            // If it's not a pair, we've reached the end of the chain
         else {
-            if (auto atom = dynamic_pointer_cast<AtomNode>(current))
-                return (atom->getValue() == "nil");
-            return false;
+            // Check if the end is specifically the 'nil' atom
+            auto atom = dynamic_pointer_cast<AtomNode>(current);
+            // It's a proper list ONLY if it ends on the atom 'nil'
+            if (atom && atom->getType() == TokenType::NIL && atom->getValue() == "nil") {
+                return true;
+            } else {
+                // Ended on a non-nil atom or something else (like a procedure)
+                return false;
+            }
         }
     }
+    // The loop should theoretically always terminate via the 'else' branch.
+    // Adding a fallback return just in case, though it shouldn't be reached.
+    // return false; // Or throw an error if this state is considered impossible
 }
 
 // Helper function for deep, structural equality comparison.
@@ -629,6 +660,18 @@ bool structuralEqual(const shared_ptr<Node>& n1, const shared_ptr<Node>& n2) {
     }
     // Otherwise, they are not structurally equal.
     return false;
+}
+
+string printEnv(const unordered_map<string, shared_ptr<Node>>& env) {
+    string s = "{";
+    bool first = true;
+    for (const auto& pair : env) {
+        if (!first) s += ", ";
+        s += pair.first + ": " + Printer::print(pair.second); // Use Printer for values
+        first = false;
+    }
+    s += "}";
+    return s;
 }
 
 shared_ptr<Node> EvalSExp(bool isGlobalLayer, const shared_ptr<Node>& node,
@@ -671,7 +714,7 @@ public:
     shared_ptr<Node> Exec(const vector<shared_ptr<Node>>& args) {
         if (args.size() != params.size()) {
             // Use the stored name in the error message if available
-            throw RunTimeException("ERROR (incorrect number of arguments) : " + (name == "lambda" ? "lambda expression" : name));
+            throw RunTimeException("ERROR (incorrect number of arguments) : " + (name == "lambda" ? "lambda" : name));
         }
 
         // Create a new local environment by copying the *captured* environment.
@@ -683,18 +726,25 @@ public:
             localEnv[params[i]] = args[i];
         }
 
-//        // Inside Procedure::Exec, after the binding loop:
-//        cout << "DEBUG: localEnv for " << name << " execution:" << endl;
-//        for(const auto& pair : localEnv) {
-//            cout << "  " << pair.first << " -> " << Printer::print(pair.second) << endl;
-//        }
+        if (g_debugMode) {
+            cout << "[DEBUG Proc::Exec]   Created local env (" << &localEnv << "): " << printEnv(localEnv) << endl;
+            // Specifically, check F
+            auto it_f_check = localEnv.find("F");
+            if (it_f_check != localEnv.end()) {
+                cout << "[DEBUG Proc::Exec]   localEnv check: Found F -> " << Printer::print(it_f_check->second) << endl;
+            } else {
+                cout << "[DEBUG Proc::Exec]   localEnv check: F NOT FOUND LOCALLY!" << endl;
+            }
+        }
 
         // Evaluate each expression in the procedure body sequentially within the localEnv.
-        shared_ptr<Node> result; // Stores the result of the last expression
-        for (const auto& expr : body) {
-            // Evaluate using the newly created local environment
-            // Pass false for isGlobalLayer as this is inside a function execution
-            result = EvalSExp(false, expr, &localEnv);
+        shared_ptr<Node> result;
+        for (size_t i = 0; i < body.size(); ++i) {
+            const auto& expr = body[i];
+            if (g_debugMode) cout << "[DEBUG Proc::Exec]   Evaluating body expr " << i << ": " << Printer::print(expr) << " using env " << &localEnv << endl; // Added env addr
+            // Ensure we are definitely passing the address of localEnv
+            result = EvalSExp(false, expr, &localEnv); // <<< Double-check this line uses &localEnv
+            if (g_debugMode) cout << "[DEBUG Proc::Exec]   Body expr " << i << " result: " << Printer::print(result) << endl;
         }
 
         // The result of the last expression in the body is the return value.
@@ -712,13 +762,11 @@ public:
 shared_ptr<Node> EvalSExp(bool isGlobalLayer,
                           const shared_ptr<Node>& node,
                           unordered_map<string, shared_ptr<Node>>* env = &globalEnv) {
-//    cout << "DEBUG: EvalSExp called for node: " << typeid(*node).name()
-//         << " with env address: " << env << endl;
-//    if (auto atom = dynamic_pointer_cast<AtomNode>(node)) {
-//        if (atom->getType() == TokenType::SYMBOL) {
-//            cout << "  Symbol: " << atom->getValue() << endl;
-//        }
-//    }
+    if (g_debugMode) {
+        cout << "[DEBUG EvalSExp] Called for node: " << Printer::print(node)
+             << " | Env Addr: " << env
+             << (env == &globalEnv ? " (Global)" : " (Local)") << endl;
+    }
 
     // For quoted expressions using the shorthand: return the inner expression unchanged.
     if (auto quote = dynamic_pointer_cast<QuoteNode>(node))
@@ -728,20 +776,43 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
     if (auto atom = dynamic_pointer_cast<AtomNode>(node)) {
         if (atom->getType() == TokenType::SYMBOL) {
             string sym = atom->getValue();
-            // If the symbol is bound in the current environment, return its binding directly.
-            if (env->find(sym) != env->end())
-                return (*env)[sym];
+            if (g_debugMode)
+                cout << "[DEBUG EvalSExp] Looking up SYMBOL: " << sym << " in env " << env << endl;
 
-            // If not found in the local env, check the global environment.
-            if (globalEnv.find(sym) != globalEnv.end())
-                return globalEnv[sym];
+            // 1. Look in the CURRENT environment ('env' parameter) FIRST.
+            auto it = env->find(sym);
+            if (it != env->end()) {
+                // Found locally (parameter, let-binding, or captured from closure)
+                if (g_debugMode)
+                    cout << "[DEBUG EvalSExp]   Found '" << sym << "' in current env (" << env << "): " << Printer::print(it->second) << endl;
+                return it->second;
+            }
 
-            // For built-in functions, you might want to keep a placeholder if necessary.
-            if (builtins.find(sym) != builtins.end())
+            // 2. If NOT found locally AND current env is NOT global, check GLOBAL env.
+            if (env != &globalEnv) {
+                auto git = globalEnv.find(sym);
+                if (git != globalEnv.end()) {
+                    // Found in global scope as a fallback
+                    if (g_debugMode)
+                        cout << "[DEBUG EvalSExp]   Found '" << sym << "' in globalEnv: " << Printer::print(git->second) << endl;
+                    return git->second;
+                }
+            }
+            // else: 'env' was already globalEnv, and it wasn't found there in step 1.
+
+            // 3. Check for built-in functions/forms if not found in any defined env.
+            if (builtins.find(sym) != builtins.end()) {
+                if (g_debugMode) cout << "[DEBUG EvalSExp]   Found '" << sym << "' as BUILTIN" << endl;
                 return make_shared<AtomNode>(TokenType::SYMBOL, "#<procedure " + sym + ">");
+            }
 
+            // 4. If still not found anywhere, it's an unbound symbol.
+            if (g_debugMode) cout << "[DEBUG EvalSExp]   Symbol '" << sym << "' is UNBOUND" << endl;
             throw RunTimeException("ERROR (unbound symbol) : " + node->toString());
+
         }
+        // --- Rest of atom handling ---
+        if (g_debugMode) cout << "[DEBUG EvalSExp] Returning Atom: " << Printer::print(node) << endl;
         return node;
     }
 
@@ -754,18 +825,26 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             throw RunTimeException("ERROR (attempt to apply non-function) : " + node->toString());
 
         // Evaluate the operator
+        if (g_debugMode) cout << "[DEBUG EvalSExp] Evaluating operator: " << Printer::print(elems[0]) << endl;
         const auto& opNode = EvalSExp(false, elems[0], env);
-        auto atomOp = dynamic_pointer_cast<AtomNode>(opNode);
 
-        if (!atomOp) {
-            if (auto proc = dynamic_pointer_cast<Procedure>(opNode)) {
-                vector<shared_ptr<Node>> args;
-                for (size_t i = 1; i < elems.size(); i++)
-                    args.push_back(EvalSExp(false, elems[i], env));
-                return proc->Exec(args);
+        // Check if operator is a Procedure (user-defined function)
+        if (auto proc = dynamic_pointer_cast<Procedure>(opNode)) {
+            if (g_debugMode) cout << "[DEBUG EvalSExp] Applying PROCEDURE: " << proc->toString() << endl;
+            vector<shared_ptr<Node>> args;
+            for (size_t i = 1; i < elems.size(); i++) {
+                if (g_debugMode) cout << "[DEBUG EvalSExp]   Evaluating arg " << i << ": " << Printer::print(elems[i]) << endl;
+                args.push_back(EvalSExp(false, elems[i], env)); // Args evaluated in current env
+                if (g_debugMode) cout << "[DEBUG EvalSExp]   Arg " << i << " evaluated to: " << Printer::print(args.back()) << endl;
             }
-            throw RunTimeException("ERROR (attempt to apply non-function) : " + Printer::print(opNode));
+            shared_ptr<Node> result = proc->Exec(args);
+            if (g_debugMode) cout << "[DEBUG EvalSExp] Procedure call returned: " << Printer::print(result) << endl;
+            return result;
         }
+
+        auto atomOp = dynamic_pointer_cast<AtomNode>(opNode);
+        if (!atomOp)
+            throw RunTimeException("ERROR (attempt to apply non-function) : " + Printer::print(opNode));
 
         if (atomOp->getType() != TokenType::SYMBOL)
             throw RunTimeException("ERROR (attempt to apply non-function) : " + atomOp->getValue());
@@ -778,6 +857,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             const string suffix = ">";
             op = op.substr(prefix.size(), op.size() - prefix.size() - suffix.size());
         }
+        if (g_debugMode) cout << "[DEBUG EvalSExp] Applying operator (likely BUILTIN or SPECIAL FORM): " << op << endl;
 
         if (op == "lambda") {
             // Syntax: (lambda (param1 ...) body1 ...)
@@ -826,7 +906,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
                 string symName = symAtom->getValue();
 
                 if (builtins.count(symName)) // Cannot redefine builtins
-                    throw RunTimeException("ERROR (DEFINE format) : cannot redefine builtin " + symName);
+                    throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
 
                 // Evaluate the value expression in the current environment
                 shared_ptr<Node> value = EvalSExp(false, elems[2], env); // Evaluate value in current env
@@ -848,7 +928,6 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
                     throw RunTimeException("ERROR (DEFINE format) : invalid function header structure");
                 }
 
-
                 if (headerElems.empty())
                     throw RunTimeException("ERROR (DEFINE format) : function header cannot be empty");
 
@@ -858,7 +937,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
 
                 string funcName = funcNameAtom->getValue();
                 if (builtins.count(funcName))
-                    throw RunTimeException("ERROR (DEFINE format) : cannot redefine builtin " + funcName);
+                    throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
 
                 // Extract parameter names (symbols)
                 vector<string> paramNames;
@@ -872,7 +951,7 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
 
                 // Collect body expressions
                 if (elems.size() < 3) // Need at least one body expression
-                    throw RunTimeException("ERROR (DEFINE format) : function requires a body");
+                    throw RunTimeException("ERROR (DEFINE format) : " + Printer::print(node));
 
                 vector<shared_ptr<Node>> bodyExprs;
                 for (size_t i = 2; i < elems.size(); ++i) {
@@ -897,86 +976,48 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
             }
         }
         if (op == "let") {
-            // Syntax: (let ((var1 val1) ...) body1 ...)
-            if (elems.size() < 3) { // Must have bindings list and at least one body expr
-                throw RunTimeException("ERROR (let format) : needs bindings list and body - " + Printer::print(node));
-            }
+            if (elems.size() < 3)
+                throw RunTimeException("ERROR (incorrect number of arguments) : let");
 
-            const auto& bindingsNode = elems[1];
-            if (!isProperList(bindingsNode)) {
-                throw RunTimeException("ERROR (let format) : bindings must be a proper list - " + Printer::print(bindingsNode));
-            }
-
-            vector<shared_ptr<Node>> bindingPairsList;
-            bindingPairsList = unrollList(bindingsNode);
-
-            // Create local environment based on *current* environment 'env'
+            // Create a new environment for the let bindings, inheriting from the current environment
             unordered_map<string, shared_ptr<Node>> localEnv = *env;
 
-            // Evaluate values and create bindings *sequentially* but values evaluated in *outer* scope
-            unordered_map<string, shared_ptr<Node>> bindings_to_add; // Store evaluated bindings temporarily
+            // First pass: evaluate all values in the original environment
+            vector<pair<string, shared_ptr<Node>>> evaluatedBindings;
+            const auto& bindingsList = elems[1];
+            if (!isProperList(bindingsList))
+                throw RunTimeException("ERROR (let with incorrect format) : " + bindingsList->toString());
 
-            for (const auto& bindingPairNode : bindingPairsList) {
-                if (!isProperList(bindingPairNode)) {
-                    throw RunTimeException("ERROR (let format) : binding must be a pair - " + Printer::print(bindingPairNode));
-                }
+            auto bindings = unrollList(bindingsList);
+            for (const auto& binding : bindings) {
+                if (!isProperList(binding))
+                    throw RunTimeException("ERROR (let with incorrect format) : " + binding->toString());
 
-                vector<shared_ptr<Node>> pairElems;
-                pairElems = unrollList(bindingPairNode);
+                auto bindingElems = unrollList(binding);
+                if (bindingElems.size() != 2)
+                    throw RunTimeException("ERROR (let with incorrect format) : " + binding->toString());
 
+                auto symbolNode = dynamic_pointer_cast<AtomNode>(bindingElems[0]);
+                if (!symbolNode || symbolNode->getType() != TokenType::SYMBOL)
+                    throw RunTimeException("ERROR (let with incorrect format) : " + binding->toString());
 
-                if (pairElems.size() != 2) {
-                    throw RunTimeException("ERROR (let format) : binding pair must have 2 elements - " + Printer::print(bindingPairNode));
-                }
-
-                auto symbolNode = dynamic_pointer_cast<AtomNode>(pairElems[0]);
-                if (!symbolNode || symbolNode->getType() != TokenType::SYMBOL) {
-                    throw RunTimeException("ERROR (let format) : binding variable must be a symbol - " + Printer::print(pairElems[0]));
-                }
-                string symbolName = symbolNode->getValue();
-
-                // Check for duplicate variable names within the same let bindings list
-                if (bindings_to_add.count(symbolName)) {
-                    throw RunTimeException("ERROR (let format) : duplicate variable in let bindings - " + symbolName);
-                }
-
-                const auto& valueExprNode = pairElems[1];
-
-                // Evaluate value expression in the *original* environment (`env`)
-                shared_ptr<Node> valueResult = EvalSExp(false, valueExprNode, env); // Use original 'env'
-
-                // Part II.d: Check for no return value from valueExpr evaluation
-                // if (!valueResult) { // If EvalSExp returns nullptr
-                //    throw RunTimeException("ERROR (no return value) : " + Printer::simplePrint(valueExprNode));
-                // }
-
-                // Store the result temporarily
-                bindings_to_add[symbolName] = valueResult;
+                // Evaluate the value in the original environment
+                auto value = EvalSExp(false, bindingElems[1], env);
+                evaluatedBindings.emplace_back(symbolNode->getValue(), value);
             }
 
-            // Now add all evaluated bindings to the local environment
-            // This ensures bindings within the same 'let' are not visible to each other during value evaluation.
-            for(const auto& pair : bindings_to_add) {
-                localEnv[pair.first] = pair.second;
+            // Second pass: apply all bindings to the local environment
+            for (const auto& binding : evaluatedBindings) {
+                localEnv[binding.first] = binding.second;
             }
 
-
-            // Evaluate body expressions in the *new local* environment
-            shared_ptr<Node> bodyResult = nullptr; // Result of the last body expression
-            if (elems.size() < 3) { // Should be caught earlier, safety check
-                throw RunTimeException("ERROR (let format) : missing body for let");
+            // Evaluate the body expressions in the new environment
+            shared_ptr<Node> result;
+            for (size_t i = 2; i < elems.size(); i++) {
+                result = EvalSExp(false, elems[i], &localEnv);
             }
 
-            for (size_t i = 2; i < elems.size(); ++i) {
-                // Pass 'false' for isGlobalLayer. Use the 'localEnv'.
-                bodyResult = EvalSExp(false, elems[i], &localEnv);
-                // Handle potential "no return value" from body evaluation based on Part II rules?
-                // If the *last* expression yields no value, 'bodyResult' might be nullptr (if EvalSExp returns that).
-                // The caller of this 'let' evaluation (or main loop) is responsible for the error if needed.
-            }
-
-            // Return the result of the last body expression
-            return bodyResult;
+            return result;
         }
         if (op == "clean-environment") {
             if (!isGlobalLayer)
@@ -1089,6 +1130,12 @@ shared_ptr<Node> EvalSExp(bool isGlobalLayer,
                 throw RunTimeException("ERROR (incorrect number of arguments) : quote");
             return elems[1];
         }
+
+        vector<shared_ptr<Node>> restArgs;
+        for (size_t i = 1; i < elems.size(); i++) {
+            if (g_debugMode) cout << "[DEBUG EvalSExp]   Evaluating arg " << i << ": " << Printer::print(elems[i]) << endl;
+        }
+
         if (op == "cons") {
             if (elems.size() != 3)
                 throw RunTimeException("ERROR (incorrect number of arguments) : cons");
