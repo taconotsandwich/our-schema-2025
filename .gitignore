@@ -32,19 +32,12 @@
 *.app
 
 # Intellij
-
 .idea/
 
-
-
 # CMake
-
 build/
 
 cmake-build-debug/
 
-
-
 # OS generated files
-
 .DS_Store
