@@ -1,9 +1,9 @@
 #include <algorithm>
-#include <cctype>
 #include <exception>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -697,7 +697,7 @@ public:
               const vector<string>& p,
               const vector<shared_ptr<Node>>& b,
               const unordered_map<string, shared_ptr<Node>>& env)
-            : name(n), params(p), body(b), captured_env(env) {}
+            : params(p), body(b), captured_env(env), name(n) {}
 
 
     // When printed, show an indicative string.
@@ -1790,9 +1790,9 @@ int main() {
             }
         }
 
-    } catch (const EOFException& e) {
+    } catch (const EOFException&) {
         cout << endl << "> ERROR (no more input) : END-OF-FILE encountered";
-    } catch (const ExitException& e) {
+    } catch (const ExitException&) {
         cout << endl << "> ";
     }
     cout << endl << "Thanks for using OurScheme!";
